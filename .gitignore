@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Python virtual environments
+venv/
+env/
+ENV/
+.dnabarmap_env/
+.MLPT2024/
+dnabarmap-env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# macOS system files
+.DS_Store
+
+# PyCharm project files
+.idea/
+
+# Logs
+*.log
+
+# Other files to ignore
+*.swp
+
+# Large file directories
+syndata/
+DNABARMAP_outputs/
