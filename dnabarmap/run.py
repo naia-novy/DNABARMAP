@@ -84,9 +84,10 @@ def cli():
     parser.add_argument('--minimum_match_fraction', type=float, default=0.7,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
     parser.add_argument('--max_len', type=int, default=150,
-                        help='Shave off ends of sequences over this length for efficiency')
+                        help='Shave off ends of sequences over this length for efficiency, '
+                             'reccomended to be at least twice length of barcode')
     parser.add_argument('--buffer', type=int, default=30,
-                        help='Expected constant region on the DNA fragment before the barcode')
+                        help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
     parser.add_argument("--cluster_iterations", type=int, default=5, help="Repeat greedy clustering this "
@@ -99,6 +100,9 @@ def cli():
     parser.add_argument("--save_intermediate_files", default=False, action='store_true',
                         help="Should not delete intermediate files generated during DNABARMAP")
 
+    parser.add_argument("--synthetic_data_available", default=False, action='store_true',
+                        help="Run comparisons to true values using synthetic data to validate functionality/accuracy")
+
     args = parser.parse_args()
 
     # Set up directories and filenames
@@ -106,14 +110,21 @@ def cli():
     args.cluster_dir = args.output_dir + '/clusters/'
     args.consensus_dir = args.output_dir + '/consensus/'
 
+    if args.base_fn is None:
+        name = args.fastq_fn if args.fastq_fn is None else args.fasta_fn is None
+        assert name is not None, 'Must provide either fasta_fn, fastq_fn, or base_fn'
+        args.base_fn = '.'.join(name.split('.')[:-1])
     if args.fastq_fn is None:
-        args.fastq_fn = args.base_fn + '.fastq'
+        args.fasta_fn = args.base_fn + '.fasta'
     if args.fasta_fn is None:
         args.fasta_fn = args.base_fn + '.fasta'
     if args.mapping_fn is None:
         args.mapping_fn = args.base_fn + '_mapping.tsv'
     args.barcodes_fn = args.base_fn + '_barcodes.fasta'  # used in array_align
     args.output_mapping_fn = 'DNABARMAP_outputs/' + args.base_fn.split('/')[-1] + '_mapping.tsv'
+
+    if args.synthetic_data_available:
+        assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
 
     if args.left_coding_flank is None:
         args.left_coding_flank = ''
@@ -125,13 +136,14 @@ def cli():
         rmtree(args.cluster_dir)
     if path.exists(args.consensus_dir):
         rmtree(args.consensus_dir)
+    if args.synthetic_data_available:
+        assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
 
     makedirs(args.cluster_dir, exist_ok=True)
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
-    args.synthetic_data_available = True
-    args.seq_limit_for_debugging = 1000  # 10000
+    # args.seq_limit_for_debugging = 1000  # 10000
 
     main(**vars(args))
 

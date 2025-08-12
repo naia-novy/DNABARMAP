@@ -29,6 +29,8 @@ setup(
     entry_points={
         'console_scripts': [
             'dnabarmap = dnabarmap.run:cli',
+            'generate_barcode_template = dnabarmap:generate_barcode_template',
+            'generate_syndata = dnabarmap:generate_syndata',
         ],
     },
 
