@@ -1,8 +1,5 @@
 from scipy.ndimage import gaussian_filter1d
-from functools import reduce
 from collections import defaultdict
-# from numpy.lib.stride_tricks import lib.stride_tricks.sliding_window_view
-
 from dnabarmap.utils import *
 np = import_cupy_numpy()
 
@@ -29,43 +26,93 @@ def reference_to_array(reference, max_len=None):
     ref[:, shift:shift+indices.shape[0]] = indices.transpose()
     return ref[:, np.newaxis, :]
 
-def score_sequences_simple(sequence_array, reference_array, sum_sequences,
-                           match_multiplier=1.0, indel_penalty=0.0, binary=False):
-    # Compute score by direct matches or partial matches. Do not consider adjacency
-    ref_mask = (reference_array != 6) & (reference_array != 0)
-    seq_mask = sequence_array != 0
-    ref_array = reference_array * ref_mask
-    seq_array = sequence_array * seq_mask
 
-    valid_indices = np.logical_and(~np.isnan(ref_array).any(axis=-1), ~np.isnan(seq_array).any(axis=-1))
+def score_sequences_simple(sequence_array, reference_array, sum_sequences,
+                                match_multiplier=1.0, indel_penalty=0.0, binary=False):
+    # Precompute constants
     match_multiplier = abs(match_multiplier)
     indel_penalty = -abs(indel_penalty)
 
-    correct = np.sum(np.logical_and(seq_array == ref_array, seq_array==1), axis=-1)
-    possibilities = np.clip(np.sum(ref_array, axis=-1), a_min=1e-8, a_max=None)
-    score = np.divide(correct, possibilities)
-
-    score *= match_multiplier
-    if len(reference_array.shape) == len(sequence_array.shape) -1:
+    # Ensure reference shape matches
+    if reference_array.ndim == sequence_array.ndim - 1:
         reference_array = np.broadcast_to(reference_array, sequence_array.shape)
-    indel_mask = np.any(np.logical_or.reduce([
-            sequence_array == 6,
-            reference_array == 6]), axis=-1)
 
+    # Masks
+    ref_mask = (reference_array != 6) & (reference_array != 0)
+    seq_mask = sequence_array != 0
+
+    # Masked arrays (without NaNs)
+    ref_array = np.where(ref_mask, reference_array, 0)
+    seq_array = np.where(seq_mask, sequence_array, 0)
+
+    # Valid index mask
+    valid_indices = ~np.isnan(ref_array).any(axis=-1) & ~np.isnan(seq_array).any(axis=-1)
+
+    # Correct matches (only where ref==1 and seq==1)
+    correct = np.sum((seq_array == 1) & (ref_array == 1), axis=-1)
+
+    # Total possibilities
+    possibilities = np.clip(np.sum(ref_array, axis=-1), 1e-8, None)
+
+    # Base score
+    score = (correct / possibilities) * match_multiplier
+
+    # Indel mask
+    indel_mask = np.any((sequence_array == 6) | (reference_array == 6), axis=-1)
+
+    # Apply NaN for invalid
     score = np.where(valid_indices, score, np.nan)
 
     if binary:
         score = (score > 0).astype(int)
         if sum_sequences:
-            return np.nansum(score, axis=-1) / valid_indices.sum(axis=-1)
+            return np.nansum(score, axis=-1) / np.maximum(valid_indices.sum(axis=-1), 1)
         else:
             return score
     else:
         score[indel_mask] = indel_penalty
         if sum_sequences:
-            return np.nansum(score, axis=-1) / valid_indices.sum(axis=-1)
+            return np.nansum(score, axis=-1) / np.maximum(valid_indices.sum(axis=-1), 1)
         else:
             return score
+
+# def score_sequences_simple(sequence_array, reference_array, sum_sequences,
+#                            match_multiplier=1.0, indel_penalty=0.0, binary=False):
+#     # Compute score by direct matches or partial matches. Do not consider adjacency
+#     ref_mask = (reference_array != 6) & (reference_array != 0)
+#     seq_mask = sequence_array != 0
+#     ref_array = reference_array * ref_mask
+#     seq_array = sequence_array * seq_mask
+#
+#     valid_indices = np.logical_and(~np.isnan(ref_array).any(axis=-1), ~np.isnan(seq_array).any(axis=-1))
+#     match_multiplier = abs(match_multiplier)
+#     indel_penalty = -abs(indel_penalty)
+#
+#     correct = np.sum(np.logical_and(seq_array == ref_array, seq_array==1), axis=-1)
+#     possibilities = np.clip(np.sum(ref_array, axis=-1), a_min=1e-8, a_max=None)
+#     score = np.divide(correct, possibilities)
+#
+#     score *= match_multiplier
+#     if len(reference_array.shape) == len(sequence_array.shape) -1:
+#         reference_array = np.broadcast_to(reference_array, sequence_array.shape)
+#     indel_mask = np.any(np.logical_or.reduce([
+#             sequence_array == 6,
+#             reference_array == 6]), axis=-1)
+#
+#     score = np.where(valid_indices, score, np.nan)
+#
+#     if binary:
+#         score = (score > 0).astype(int)
+#         if sum_sequences:
+#             return np.nansum(score, axis=-1) / valid_indices.sum(axis=-1)
+#         else:
+#             return score
+#     else:
+#         score[indel_mask] = indel_penalty
+#         if sum_sequences:
+#             return np.nansum(score, axis=-1) / valid_indices.sum(axis=-1)
+#         else:
+#             return score
 
 def score_sequences(sequence_array, reference_array, sum_sequences,
                     match_multiplier=1.0, indel_penalty=0.0, binary=False):
@@ -87,7 +134,7 @@ def score_sequences(sequence_array, reference_array, sum_sequences,
         correct = correct[np.newaxis]
         probs = probs[np.newaxis]
         reformat = True
-    score = compute_adjacency_score_simple(correct, probs,
+    score = compute_adjacency_score(correct, probs,
                                                         max_run=15, squared_scores=False)
     if reformat:
         score = score[0]
@@ -114,16 +161,6 @@ def score_sequences(sequence_array, reference_array, sum_sequences,
         else:
             return score
 
-def compute_adjacency_score_simple(wins, probs,
-                                   max_run,
-                                   squared_scores=False):
-    E, B, L = wins.shape
-    scores = np.zeros((E, B, L), dtype=float)
-
-    # For each run length
-    for run_len in range(1, max_run + 1):
-        if run_len > L:
-            break
 
         # # Make a view of shape (B, L-run_len+1, run_len)
         # try:
@@ -133,61 +170,66 @@ def compute_adjacency_score_simple(wins, probs,
         # except:
         #     # numpy version of sliding function
         #     windows = np.lib.stride_tricks.sliding_window_view(wins, window_shape=run_len, axis=-1)
-        windows = np.lib.stride_tricks.sliding_window_view(wins, window_shape=run_len, axis=-1)
+def compute_adjacency_score(wins, probs, max_run, squared_scores=False):
+    E, B, L = wins.shape
+    scores = np.zeros((E, B, L), dtype=float)
+    inv_probs = 1.0 / np.clip(probs, 1e-8, None)
 
-        # Check which windows are entirely True
-        valid_runs = windows.all(axis=-1)  # shape (B, L-run_len+1), dtype=bool
+    # cumulative sum along last axis (pad with a zero at start)
+    csum = np.cumsum(wins, axis=-1, dtype=int)
+    csum = np.pad(csum, ((0,0),(0,0),(1,0)), mode='constant', constant_values=0)
 
-        # Weight for this run length
+    for run_len in range(1, min(max_run, L) + 1):
+        seg_sum = csum[:, :, run_len:] - csum[:, :, :-run_len]  # shape (E,B,L-run_len+1)
+        valid_runs = (seg_sum == run_len)
+
         weight = run_len**2 if squared_scores else run_len
+        scores[:, :, :L-run_len+1] += weight * valid_runs
 
-        # Add weight at each window’s start position
-        scores[:, :, :L-run_len+1] += weight * valid_runs.astype(float)
-
-    scores /= probs
+    scores *= inv_probs
     return scores
-
-def compute_weighted_adjacency_score(wins, probs,
-                                     max_run=10,
-                                     squared_scores=True,
-                                     keep_positional=False):
-    n_rolls, n_seqs, seq_len = wins.shape
-    total_score = (
-        np.zeros_like(wins, dtype=float)
-        if keep_positional
-        else np.zeros((n_rolls, n_seqs), dtype=float)
-    )
-
-    # avoid division by zero
-    probs = np.clip(probs, 1e-8, None)
-
-    for run_len in range(1, max_run + 1):
-        slices = [
-            wins[:, :, i : seq_len - run_len + i + 1]
-            for i in range(run_len)
-        ]
-        adjacency = reduce(np.logical_and, slices)
-
-        if run_len > 1:
-            adj_norm = adjacency / probs[:, :, :adjacency.shape[-1]]
-        else:
-            adj_norm = adjacency / probs  # full-length
-
-        adj_full = np.zeros_like(wins, dtype=float)
-        adj_full[:, :, 0 : adjacency.shape[-1]] = adj_norm
-
-        if squared_scores:
-            increment = (run_len * adj_full) ** 2
-        else:
-            increment = run_len * adj_full
-
-        if keep_positional:
-            total_score += increment
-        else:
-            # sum across positions to get a single score per sequence
-            total_score += increment.sum(axis=-1)
-
-    return total_score
+#
+# def compute_weighted_adjacency_score(wins, probs,
+#                                      max_run=10,
+#                                      squared_scores=True,
+#                                      keep_positional=False):
+#     n_rolls, n_seqs, seq_len = wins.shape
+#     total_score = (
+#         np.zeros_like(wins, dtype=float)
+#         if keep_positional
+#         else np.zeros((n_rolls, n_seqs), dtype=float)
+#     )
+#
+#     # avoid division by zero
+#     probs = np.clip(probs, 1e-8, None)
+#
+#     for run_len in range(1, max_run + 1):
+#         slices = [
+#             wins[:, :, i : seq_len - run_len + i + 1]
+#             for i in range(run_len)
+#         ]
+#         adjacency = reduce(np.logical_and, slices)
+#
+#         if run_len > 1:
+#             adj_norm = adjacency / probs[:, :, :adjacency.shape[-1]]
+#         else:
+#             adj_norm = adjacency / probs  # full-length
+#
+#         adj_full = np.zeros_like(wins, dtype=float)
+#         adj_full[:, :, 0 : adjacency.shape[-1]] = adj_norm
+#
+#         if squared_scores:
+#             increment = (run_len * adj_full) ** 2
+#         else:
+#             increment = run_len * adj_full
+#
+#         if keep_positional:
+#             total_score += increment
+#         else:
+#             # sum across positions to get a single score per sequence
+#             total_score += increment.sum(axis=-1)
+#
+#     return total_score
 
 
 def cached_intervals(seq_len, min_len, a, b):
@@ -234,7 +276,6 @@ def prepare_cumsums(arr, A, B, relevant_range):
 def best_single_interval(arr, A, B, relevant_range, valid, valid_bound,
                          max_patience, min_len=0, indel_penalty=0.0):
     # Extract the best combination of pairwise shifts that improves the score
-    # This function takes the longest and should be optimized ; get_precise_topk is 1/3 of its runtime
     batch_size, seq_len = valid.shape
 
     cumsum_center, cumsum_flank, a, b = prepare_cumsums(arr, A, B, relevant_range)
@@ -366,35 +407,75 @@ def find_suggestions(seqs, refs, match_multiplier, indel_penalty, patience, vali
 
     return best
 
+
+
+
 def find_best_rolls_batch(seqs, refs, match_multiplier, indel_penalty):
-    # Look at many rolls to find best initial approximate alignment
-    max_shift = min(50, seqs.shape[1] // 2)
-    provided_range = range(-max_shift, max_shift + 1)
-
+    # Parameters
+    max_shift = min(40, seqs.shape[1] // 2)
+    provided_range = np.arange(-max_shift, max_shift + 1)
+    n_rolls = len(provided_range)
     n_seqs, seq_len, seq_dim = seqs.shape
-    result = np.zeros((len(provided_range),n_seqs, seq_len))
 
-    for idx, roll_val in enumerate(provided_range):
-        rolled = np.roll(seqs, shift=roll_val, axis=1)
-        scores = score_sequences_simple(rolled, refs, False, match_multiplier, indel_penalty)
-        result[idx] = scores
+    # Precompute rolled sequences in one big array
+    # Shape: (n_rolls, n_seqs, seq_len, seq_dim)
+    rolled_all = np.empty((n_rolls, n_seqs, seq_len, seq_dim), dtype=seqs.dtype)
+    for idx, shift in enumerate(provided_range):
+        rolled_all[idx] = np.roll(seqs, shift=shift, axis=1)
 
-    result_mask = np.isnan(result)
-    result[result_mask] = 0
-    cum_scores = np.nansum(result, axis=-1)
-    wins = (result > 0)
+    # Score all rolls in one go — vectorized score_sequences_simple
+    scores = score_sequences_simple(rolled_all, refs, False, match_multiplier, indel_penalty)
+
+    # NaN → 0, compute cum_scores
+    result_mask = np.isnan(scores)
+    scores[result_mask] = 0
+    cum_scores = scores.sum(axis=-1)  # sum over seq_len
+
+    # Compute adjacency scores (batched)
+    wins = scores > 0
     probs = np.nan_to_num(refs.sum(axis=-1)[np.newaxis], nan=1)
-    adjacency_matrix = compute_weighted_adjacency_score(wins, probs, max_run=15, squared_scores=False)
+    adjacency_matrix = compute_adjacency_score(wins, probs, max_run=10, squared_scores=False).sum(axis=-1)
 
     # Smooth across roll axis
-    smoothed = gaussian_filter1d(adjacency_matrix*cum_scores, sigma=5, axis=0)
+    smoothed = gaussian_filter1d(adjacency_matrix * cum_scores, sigma=5, axis=0)
 
     # Pick best roll per sequence
-    best_rolls = np.argmax(smoothed, axis=0)
-    best_scores = smoothed[best_rolls, np.arange(smoothed.shape[1])]
-    best_rolls = [provided_range[i] for i in best_rolls]
+    best_rolls_idx = np.argmax(smoothed, axis=0)
+    best_scores = smoothed[best_rolls_idx, np.arange(n_seqs)]
+    best_rolls = provided_range[best_rolls_idx]
 
     return best_rolls, best_scores
+
+
+# def find_best_rolls_batch(seqs, refs, match_multiplier, indel_penalty):
+#     # Look at many rolls to find best initial approximate alignment
+#     max_shift = min(40, seqs.shape[1] // 2)
+#     provided_range = range(-max_shift, max_shift + 1)
+#
+#     n_seqs, seq_len, seq_dim = seqs.shape
+#     result = np.zeros((len(provided_range),n_seqs, seq_len))
+#
+#     for idx, roll_val in enumerate(provided_range):
+#         rolled = np.roll(seqs, shift=roll_val, axis=1)
+#         scores = score_sequences_simple(rolled, refs, False, match_multiplier, indel_penalty)
+#         result[idx] = scores
+#
+#     result_mask = np.isnan(result)
+#     result[result_mask] = 0
+#     cum_scores = np.nansum(result, axis=-1)
+#     wins = (result > 0)
+#     probs = np.nan_to_num(refs.sum(axis=-1)[np.newaxis], nan=1)
+#     adjacency_matrix = compute_adjacency_score(wins, probs, max_run=10, squared_scores=False).sum(axis=-1)
+#
+#     # Smooth across roll axis
+#     smoothed = gaussian_filter1d(adjacency_matrix*cum_scores, sigma=5, axis=0)
+#
+#     # Pick best roll per sequence
+#     best_rolls = np.argmax(smoothed, axis=0)
+#     best_scores = smoothed[best_rolls, np.arange(smoothed.shape[1])]
+#     best_rolls = [provided_range[i] for i in best_rolls]
+#
+#     return best_rolls, best_scores
 
 def roll_batch(batch_array, roll_values):
     # Apply batched roll to array

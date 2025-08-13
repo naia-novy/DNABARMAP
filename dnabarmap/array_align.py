@@ -50,7 +50,6 @@ def decode_alignment(sequence, reference=None, reduce=False):
 def initialize_sequences(sequences, barcode_template, match_multiplier, indel_penalty, data,
                          synthetic_data_available, seq_limit_for_debugging, max_len, buffer, batch_size, **kwargs):
     # Convert sequences to arrays and do initial approximate alignment
-    # Set parameters for parsing inputs
     buffer = int(buffer*0.75)
     length_mult = 2
     template_len = len(barcode_template)
@@ -73,11 +72,22 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
         for batch_idx in range(0, sequence_array.shape[1], batch_size):
             batch_end = min(batch_idx + batch_size, sequence_array.shape[1])
 
+            # pr2 = cProfile.Profile()
+            # pr2.enable()
+
             rolls, scores = find_best_rolls_batch(
                 sequence_array[s, batch_idx:batch_end],
                 reference_array[batch_idx:batch_end],
                 match_multiplier=match_multiplier,
                 indel_penalty=indel_penalty)
+
+
+            # pr2.disable()
+            # st = io.StringIO()
+            # sortby = SortKey.CUMULATIVE
+            # ps = pstats.Stats(pr2, stream=st).sort_stats(sortby)
+            # ps.print_stats(50)
+            # print(st.getvalue())
 
             sequence_array[s, batch_idx:batch_end] = roll_batch(
                 sequence_array[s, batch_idx:batch_end], rolls)
@@ -94,6 +104,8 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
     return best_sequences
 
 def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False):
+    return
+
     # Print alignment to true barcode and barcode reference
     results = []
     decoded_sequences = []
@@ -250,7 +262,7 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # Set debugging/optimization parameters
-    parser.add_argument('--seq_limit_for_debugging', type=int, default=10000,
+    parser.add_argument('--seq_limit_for_debugging', type=int, default=1000,
                         help='Filter dataset to subset for debugging')
     parser.add_argument('--synthetic_data_available', default=True, action='store_true',
                         help='Compare alignments to synthetic data or true values')
