@@ -39,12 +39,6 @@ def decode_alignment(sequence, reference=None, reduce=False):
         decoded_sequences[1] = ''.join([val for i,val in enumerate(decoded_sequences[1]) if nonred_ref[i] != '-'])
         decoded_sequences[0] = decoded_sequences[0].replace('-', 'N')
         decoded_sequences[1] = decoded_sequences[1].replace('-', 'N')
-        if len(decoded_sequences[0]) != len(decoded_sequences[1]):
-            pass
-        elif len(decoded_sequences[0]) != 60:
-            pass
-        elif len(decoded_sequences[1]) != 60:
-            pass
 
     return decoded_sequences
 
@@ -102,8 +96,6 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
     return best_sequences
 
 def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False):
-    # return
-
     # Print alignment to true barcode and barcode reference
     results = []
     decoded_sequences = []
@@ -235,13 +227,7 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
     for i in range(0, sequence_array.shape[0], batch_size):
         batch_seq = sequence_array[i:i + batch_size]
         batch_ref = reference_array[i:i + batch_size]
-
-        # # Flatten arrays now since numba cant handle it
-        # batch_flat, n_items = flatten_array(batch_seq)
-        # batch_ref, ref_n = flatten_array(batch_ref)
-        #
-        # score = score_sequences_simple(batch_flat, batch_ref, batch_seq.shape, n_items, ref_n)
-        score = score_sequences_wrapper(batch_seq, batch_ref)
+        score = score_sequences_simple(batch_seq, batch_ref)
 
         score = (score > 0).astype(int)
         scores.append(score.sum(axis=-1))  # sum over sequence length
@@ -268,14 +254,14 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # Set debugging/optimization parameters
-    parser.add_argument('--seq_limit_for_debugging', type=int, default=1000,
+    parser.add_argument('--seq_limit_for_debugging', type=int, default=10000,
                         help='Filter dataset to subset for debugging')
-    parser.add_argument('--synthetic_data_available', default=False, action='store_true',
+    parser.add_argument('--synthetic_data_available', default=True, action='store_true',
                         help='Compare alignments to synthetic data or true values')
 
     # Set alignment parameters
-    parser.add_argument('--batch_size', type=int, default=256)
-    parser.add_argument('--patience', type=int, default=5,
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--patience', type=int, default=3,
                         help='How many times to try next best suggestion before giving up')
     parser.add_argument('--indel_penalty', type=float, default=1,
                         help='Additional penalty for each indel')
@@ -288,17 +274,10 @@ if __name__ == '__main__':
     parser.add_argument('--barcode_template', type=str,
                             default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
                             help='Reference degenerate barcode to align sequences to')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.7,
                         help='Require at least this fraction of bases to match any reference possiblity')
     parser.add_argument('--input_fn', type=str, default='./syndata/syndataA.pkl')
     parser.add_argument('--output_fn', type=str, default='./syndata/syndataA_barcodes.fasta')
-
-
-    import cProfile, pstats, io
-    from pstats import SortKey
-
-    pr2 = cProfile.Profile()
-    pr2.enable()
 
     args = parser.parse_args()
     assert args.match_multiplier > 0
@@ -321,12 +300,3 @@ if __name__ == '__main__':
         ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
         ps.print_stats(50)
         print(s.getvalue())
-
-
-
-    pr2.disable()
-    st = io.StringIO()
-    sortby = SortKey.CUMULATIVE
-    ps = pstats.Stats(pr2, stream=st).sort_stats(sortby)
-    ps.print_stats(50)
-    print(st.getvalue())
