@@ -250,11 +250,10 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
     write_fasta(decoded_sequences, output_fn)
 
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # Set debugging/optimization parameters
-    parser.add_argument('--seq_limit_for_debugging', type=int, default=10000,
+    parser.add_argument('--seq_limit_for_debugging', type=int, default=1000,
                         help='Filter dataset to subset for debugging')
     parser.add_argument('--synthetic_data_available', default=True, action='store_true',
                         help='Compare alignments to synthetic data or true values')
@@ -272,12 +271,13 @@ if __name__ == '__main__':
     parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode')
     parser.add_argument('--barcode_template', type=str,
-                            default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
-                            help='Reference degenerate barcode to align sequences to')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.7,
+                            # default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
+                        default='MBDMKHVKYVDYRBHRSHDSMDBMWBVWSDHSRHBRWBVWKVHKMBDMYDVYWVBWMBDM',
+                                           help='Reference degenerate barcode to align sequences to')
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
                         help='Require at least this fraction of bases to match any reference possiblity')
-    parser.add_argument('--input_fn', type=str, default='./syndata/syndataA.pkl')
-    parser.add_argument('--output_fn', type=str, default='./syndata/syndataA_barcodes.fasta')
+    parser.add_argument('--input_fn', type=str, default='./syndata/syndataC.pkl')
+    parser.add_argument('--output_fn', type=str, default='./syndata/syndataC_barcodes.fasta')
 
     args = parser.parse_args()
     assert args.match_multiplier > 0
