@@ -5,6 +5,7 @@ from dnabarmap.align_actions import *
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+
 def decode_alignment(sequence, reference=None, reduce=False):
     """Convert one-hot encoded sequence array or alignment back to nucleotide sequence."""
     sequences = []
@@ -51,7 +52,7 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
                          synthetic_data_available, seq_limit_for_debugging, max_len, buffer, batch_size, **kwargs):
     # Convert sequences to arrays and do initial approximate alignment
     buffer = int(buffer*0.75)
-    length_mult = 2
+    length_mult = 1.75
     template_len = len(barcode_template)
     template_len = int(template_len*length_mult)
 
@@ -66,36 +67,33 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
     reference_array = np.repeat(reference_array[np.newaxis], len(sequence_array[1]), axis=0)
     reference_array = np.transpose(reference_array[:, :, 0], (0, 2, 1))
 
+    seq_stacked = np.stack([seq_A_array, seq_B_array], axis=0)
+    ref_stacked = np.stack([reference_array, reference_array], axis=0)
+
     # Score top and bottom strand alignments to orient and approximately position sequences
     score_array = np.zeros((2, sequence_array.shape[1]))
-    for s in range(2):
-        for batch_idx in range(0, sequence_array.shape[1], batch_size):
-            batch_end = min(batch_idx + batch_size, sequence_array.shape[1])
+    best_rolls_array = np.zeros_like(score_array)
 
-            # pr2 = cProfile.Profile()
-            # pr2.enable()
+    for batch_idx in range(0, seq_stacked.shape[1], batch_size):
+        batch_end = min(batch_idx + batch_size, seq_stacked.shape[1])
 
-            rolls, scores = find_best_rolls_batch(
-                sequence_array[s, batch_idx:batch_end],
-                reference_array[batch_idx:batch_end],
-                match_multiplier=match_multiplier,
-                indel_penalty=indel_penalty)
+        # Find best roll and score for both strands simultaneously
+        rolls, scores = find_best_rolls_batch(
+            seq_stacked[:, batch_idx:batch_end],
+            ref_stacked[:, batch_idx:batch_end],
+            match_multiplier=match_multiplier,
+            indel_penalty=indel_penalty)
 
+        score_array[:, batch_idx:batch_end] = scores
+        best_rolls_array[:, batch_idx:batch_end] = rolls
 
-            # pr2.disable()
-            # st = io.StringIO()
-            # sortby = SortKey.CUMULATIVE
-            # ps = pstats.Stats(pr2, stream=st).sort_stats(sortby)
-            # ps.print_stats(50)
-            # print(st.getvalue())
-
-            sequence_array[s, batch_idx:batch_end] = roll_batch(
-                sequence_array[s, batch_idx:batch_end], rolls)
-            score_array[s, batch_idx:batch_end] = scores
-
-    best_indices = np.argmax(score_array, axis=0)
+    best_indices = np.argmax(score_array, axis=0)  # 0 = fw, 1 = rv
     batch_idxs = np.arange(score_array.shape[1])
+    best_rolls = best_rolls_array[best_indices, batch_idxs]  # pick roll for winning strand
+
+    # Gather sequences corresponding to best strand
     best_sequences = sequence_array[best_indices, batch_idxs]
+    best_sequences = roll_batch(best_sequences, best_rolls.astype(int)) # reroll best sequences
 
     if synthetic_data_available:
         print(f'If using synthetic data, number of incorrectly oriented sequences: {best_indices.sum()}')
@@ -104,7 +102,7 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
     return best_sequences
 
 def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False):
-    return
+    # return
 
     # Print alignment to true barcode and barcode reference
     results = []
@@ -170,7 +168,6 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
     if synthetic_data_available:
         report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, range(sequence_array.shape[0]), plot=True)
 
-    available_indices = np.where(patience_counter <= patience)[0]
     N = sequence_array.shape[0]
     active = deque(range(N))  # all indices start “active”
     patience_counter = np.zeros(N, dtype=int)
@@ -232,12 +229,21 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
             elif patience_counter[idx] < patience:
                 active.append(idx)
 
+
     # Convert arrays into nucleotide sequences for downstream processing
     scores = []
     for i in range(0, sequence_array.shape[0], batch_size):
         batch_seq = sequence_array[i:i + batch_size]
         batch_ref = reference_array[i:i + batch_size]
-        score = score_sequences_simple(batch_seq, batch_ref, sum_sequences=False, binary=True)
+
+        # # Flatten arrays now since numba cant handle it
+        # batch_flat, n_items = flatten_array(batch_seq)
+        # batch_ref, ref_n = flatten_array(batch_ref)
+        #
+        # score = score_sequences_simple(batch_flat, batch_ref, batch_seq.shape, n_items, ref_n)
+        score = score_sequences_wrapper(batch_seq, batch_ref)
+
+        score = (score > 0).astype(int)
         scores.append(score.sum(axis=-1))  # sum over sequence length
     scores = np.concatenate(scores, axis=0)
 
@@ -264,28 +270,35 @@ if __name__ == '__main__':
     # Set debugging/optimization parameters
     parser.add_argument('--seq_limit_for_debugging', type=int, default=1000,
                         help='Filter dataset to subset for debugging')
-    parser.add_argument('--synthetic_data_available', default=True, action='store_true',
+    parser.add_argument('--synthetic_data_available', default=False, action='store_true',
                         help='Compare alignments to synthetic data or true values')
 
     # Set alignment parameters
-    parser.add_argument('--batch_size', type=int, default=512)
+    parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up')
     parser.add_argument('--indel_penalty', type=float, default=1,
                         help='Additional penalty for each indel')
-    parser.add_argument('--match_multiplier', type=float, default=3,
+    parser.add_argument('--match_multiplier', type=float, default=4,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--max_len', type=int, default=150,
+    parser.add_argument('--max_len', type=int, default=140,
                         help='Remove sequences over this length for efficiency')
-    parser.add_argument('--buffer', type=int, default=30,
+    parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode')
     parser.add_argument('--barcode_template', type=str,
                             default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
                             help='Reference degenerate barcode to align sequences to')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.7,
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
                         help='Require at least this fraction of bases to match any reference possiblity')
     parser.add_argument('--input_fn', type=str, default='./syndata/syndataA.pkl')
     parser.add_argument('--output_fn', type=str, default='./syndata/syndataA_barcodes.fasta')
+
+
+    import cProfile, pstats, io
+    from pstats import SortKey
+
+    pr2 = cProfile.Profile()
+    pr2.enable()
 
     args = parser.parse_args()
     assert args.match_multiplier > 0
@@ -309,3 +322,11 @@ if __name__ == '__main__':
         ps.print_stats(50)
         print(s.getvalue())
 
+
+
+    pr2.disable()
+    st = io.StringIO()
+    sortby = SortKey.CUMULATIVE
+    ps = pstats.Stats(pr2, stream=st).sort_stats(sortby)
+    ps.print_stats(50)
+    print(st.getvalue())
