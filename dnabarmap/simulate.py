@@ -4,6 +4,8 @@ from os import remove
 import mappy as mp
 import pandas as pd
 import random
+import gzip
+
 
 def simulate_nanopore(sequence):
     # Create a temporary FASTA file for the sequence
@@ -67,8 +69,6 @@ def save_seqs_to_csv(input_fasta_fn, first_n=80, align=False):
     print(df)
     print(df.columns)
 
-
-
 def simulate_many(sequences):
     # Create a temporary FASTA file for the sequence
     with tempfile.NamedTemporaryFile(mode='w+', suffix='.fasta', delete=False) as tmp_fasta:
@@ -78,33 +78,25 @@ def simulate_many(sequences):
             tmp_fasta.write(f">{idx}\n")
             tmp_fasta.write(f"{sequence}\n")
 
-    fastq_filename = fasta_filename.replace('.fasta', '.fastq')
-    # Paths
-    pbsim_dir = 'pbsim3'
-    # PBSIM command
+    prefix = fasta_filename.replace('.fasta', '')
     pbsim_command = [
-        '/Users/natenovy/Research/barcode_simulation/pbsim',
+        'pbsim',
         '--strategy', 'templ',
         '--method', 'qshmm',
-        '--qshmm', 'pbsim3-master/data/QSHMM-ONT.model',  # 'pbsim3-master/data/QSHMM-ONT-HQ.model'
+        '--qshmm', 'data/QSHMM-ONT.model',
         '--template', fasta_filename,
-        '--prefix', fasta_filename.replace('.fasta', ''),
+        '--prefix', prefix,
         '--depth', '1'
     ]
+    subprocess.run(pbsim_command, capture_output=True, cwd='./', text=True, check=True)
 
-    # Run PBSIM and capture output
-    result = subprocess.run(
-        pbsim_command,
-        capture_output=True,
-        text=True,
-        cwd=pbsim_dir,
-        check=True)
+    fastq_filename = f"{prefix}.fq.gz"  # correct expected filename
 
     # Read the simulated FASTQ output
-    with open(fastq_filename, 'r') as fastq_file:
+    with gzip.open(fastq_filename, 'rt') as fastq_file:  # 'rt' = read text mode
         lines = fastq_file.readlines()
-        sequences = [seq[:-1] for i, seq in enumerate(lines) if ((i-1) % 4) == 0]
-        qualities = [seq[:-1] for i, seq in enumerate(lines) if ((i-3) % 4) == 0]
+        sequences = [seq.rstrip("\n") for i, seq in enumerate(lines) if ((i - 1) % 4) == 0]
+        qualities = [seq.rstrip("\n") for i, seq in enumerate(lines) if ((i - 3) % 4) == 0]
 
     # Clean up the temporary FASTA file
     remove(fasta_filename)

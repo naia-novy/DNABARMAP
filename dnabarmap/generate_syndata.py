@@ -62,16 +62,17 @@ def could_form_homopolymer(seq, max_len):
     return False
 
 def generate_barcode_template(barcode_len, motif, max_homopolymer_len=3, attempt_n_barcodes=10, **kwargs):
-    initial_template = motif * int(barcode_len / len(motif))
+    initial_template = motif * np.ceil(barcode_len / len(motif)).astype(int)
+    initial_template = initial_template[:barcode_len]
 
     observations = []
     scores = []
-    for i in range(attempt_n_barcodes):
+    for idx in range(attempt_n_barcodes):
         processing = True
         while processing:
             # Add bases to minimize homopolymer introduction
             barcode = []
-            for i, c in enumerate(initial_template):
+            for _, c in enumerate(initial_template):
                 invalid_nucleotides = set()
                 if len(barcode) > 0:
                     if barcode[-1] == 'N':
@@ -171,20 +172,20 @@ if __name__ == '__main__':
                         help='Length of barcode when generating')
     parser.add_argument('--max_homopolymer_len', type=int, default=3,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--attempt_n_barcodes', type=int, default=10000,
+    parser.add_argument('--attempt_n_barcodes', type=int, default=1000,
                         help='Number of attempts to generate barcode template')
     parser.add_argument('--motif', type=str, default=None,
                         help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate samplign')
 
     # Parameters defining what syndata to generate
-    parser.add_argument('--duplication_rate', type=float, default=100,
+    parser.add_argument('--duplication_rate', type=float, default=50,
                         help='Analogous to sequencing depth')
-    parser.add_argument('--barcodes_per_variant', type=float, default=50)
+    parser.add_argument('--barcodes_per_variant', type=float, default=5)
     parser.add_argument('--num_variants', type=float, default=100)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
+                        default='MBDMKHVKYVDYRBHRSHDSMDBMWBVWSDHSRHBRWBVWKVHKMBDMYDVYWVBWMBDM',
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
@@ -197,7 +198,7 @@ if __name__ == '__main__':
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
     parser.add_argument('--right_coding_flank', type=str, default='TATCAGAGTC',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/syndataB')
+    parser.add_argument('--fn', type=str, default='syndata/syndataC')
 
     args = parser.parse_args()
 
