@@ -6,19 +6,19 @@ from dnabarmap.utils import import_cupy_numpy
 np = import_cupy_numpy()
 
 def run_vsearch(
-    fasta_fn,
+    output_fn,
     cluster_dir,
     threads=16,
     cluster_iterations=5,
     **kwargs):
-    fasta_fn = fasta_fn.replace('.fasta', '_barcodes.fasta')
     makedirs(cluster_dir, exist_ok=True)
     # Use vsearch clustering iterativly to cluster sequences by similarity
     # Do not allow indels since this was already approximated in the alignment step
 
     # Step 1: First clustering round
-    values = np.linspace(0.7, 0.90, cluster_iterations)
-    input_fasta = fasta_fn
+    input_fasta = output_fn
+    adj_cluster_iterations = cluster_iterations - 1
+    values = list(np.linspace(0.97, 0.85, adj_cluster_iterations)) + [0.97]
     for i in range(cluster_iterations):
         out = path.join(cluster_dir, f"consensus_r{i+1}.fasta")
         uc = path.join(cluster_dir, f"clusters_r{i+1}.uc")
@@ -34,8 +34,9 @@ def run_vsearch(
             "--sizein",
             "--clusterout_sort",
             "--cons_truncate",
-            "--gapopen", "100",
-            "--gapext", "100"
+            # "--gapopen", "2",
+            # "--gapext", "4",
+            # "--mismatch", "-4",
         ]
         print(f"Running clustering iteration {i+1}")
         subprocess.run(cmd,
@@ -47,21 +48,22 @@ def run_vsearch(
     # Final mapping
     final_uc = path.join(cluster_dir, "clustered_barcodes.uc")
     cmd = [
-        "vsearch", "--usearch_global", fasta_fn,
+        "vsearch", "--usearch_global", input_fasta,
         "--db", out,
         "--id", str(id),
         "--threads", str(threads),
         "--uc", final_uc,
         "--sizein",
-        "--gapopen", "100",
-        "--gapext", "100"
+        # "--gapopen", "2",
+        # "--gapext", "4",
+        # "--mismatch", "-4",
     ]
     subprocess.run(cmd,
                    check=True,
                    stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)
 
-def save_full_seqs(fastq_fn, min_sequences, cluster_iterations, seq_limit_for_debugging=None, **kwargs):
+def save_full_seqs(fasta_fn, min_sequences, cluster_iterations, seq_limit_for_debugging=None, **kwargs):
     # Using cluster information, save all full seqs for a given cluster to a file
     if seq_limit_for_debugging is None:
         seq_limit_for_debugging = np.inf
@@ -94,18 +96,20 @@ def save_full_seqs(fastq_fn, min_sequences, cluster_iterations, seq_limit_for_de
 
         expansions[i] = expand
 
+    print(f"Found {len(approved_clusters)} clusters with >= {min_sequences} sequences.")
+
     # Group full sequences for clustering
     clustered_sequences = defaultdict(list)
-    with open(fastq_fn) as handle:
-        for seq_idx, record in enumerate(SeqIO.parse(handle, "fastq")):
+    with open(fasta_fn) as handle:
+        for seq_idx, record in enumerate(SeqIO.parse(handle, "fasta")):
             if seq_idx >= seq_limit_for_debugging:
                 break
-            cluster_id = resolve_final_cluster(seq_idx, expansions)
+            id_ = record.id
+            cluster_id = resolve_final_cluster(id_, expansions)
             if cluster_id not in approved_clusters:
                 continue
 
             clustered_sequences[cluster_id].append(record)
-
 
     for cluster, seqs in clustered_sequences.items():
         with open(f"tmp/clusters/cluster_{cluster}.fasta", "w") as f:

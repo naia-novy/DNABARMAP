@@ -39,3 +39,4 @@ dnabarmap-env/
 # Large file directories
 syndata/
 DNABARMAP_outputs/
+/tmp/

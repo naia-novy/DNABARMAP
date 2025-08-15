@@ -1,60 +1,59 @@
-from os import remove, path
-import subprocess
 from Bio import SeqIO
+import subprocess, tempfile
 from glob import glob
+import numpy as np
+
 
 def determine_consensus(**kwargs):
-    # For each file of clustered full sequences, determine a single consensus sequence
-    clusters = glob("tmp/clusters/cluster_*.fasta")
-    for fn in clusters:
+    for fn in glob("tmp/clusters/cluster_*.fasta"):
         cluster_id = fn.split('_')[-1].split('.')[0]
+        outpath = f"tmp/consensus/cluster_{cluster_id}_consensus.fasta"
 
-        # Read the cluster file (these should contain sequence headers from original reads)
-        cluster_records = list(SeqIO.parse(fn, "fasta"))
-        read_ids = [rec.id.split(';')[0] for rec in cluster_records]  # strip any annotations like ;size=
-
-        ref_fasta = f"tmp/clusters/cluster_{cluster_id}_ref.fasta"
-        reads_fasta = f"tmp/clusters/cluster_{cluster_id}_read.fasta"
-        paf_path = f"tmp/clusters/{cluster_id}.paf"
-        consensus_path = f"tmp/consensus/cluster_{cluster_id}_consensus.fasta"
-
-        ref_record = cluster_records[0]
-        other_records = cluster_records[1:]
-
-        SeqIO.write(ref_record, ref_fasta, "fasta")
-        SeqIO.write(other_records, reads_fasta, "fasta")
-
-        # Align with minimap2
-        minimap2_cmd = [
-            "minimap2", "-x", "map-ont", ref_fasta, reads_fasta
-        ]
-        with open(paf_path, "w") as paf_file:
-            subprocess.run(minimap2_cmd, stdout=paf_file, stderr=subprocess.DEVNULL, check=True)
-
-        if path.getsize(paf_path) == 0:
-            print(f"No overlaps for cluster {cluster_id}; skipping racon.")
+        recs = list(SeqIO.parse(fn, "fasta"))
+        if not recs:
+            print("skip empty", fn);
             continue
 
-        # Consensus with racon
-        racon_cmd = ["racon", reads_fasta, paf_path, ref_fasta]
-        result = subprocess.run(
-            racon_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True
-        )
+        with tempfile.TemporaryDirectory() as temp:
+            aln = temp + "/aln.fasta"
+            subprocess.run(["mafft", "--localpair", "--maxiterate", "1000", "--retree", "2", fn],
+                           stdout=open(aln, "w"), stderr=subprocess.DEVNULL, check=True)
+            plurality = max(1, np.ceil(len(recs) * 0.5))
+            cons_out = temp + "/cons.fasta"
 
-        if result.stdout.strip():
-            with open(consensus_path, "w") as f:
-                f.write(result.stdout)
+            plurality = 1
+            subprocess.run(["cons", "-sequence", aln, "-outseq", cons_out,
+                            "-name", f"consensus_{cluster_id}", "-plurality", str(plurality), "-auto"],
+                           check=True)
+            final = next(SeqIO.parse(cons_out, "fasta"))
+            final.id = f"consensus_{cluster_id}";
+            final.description = ""
+            SeqIO.write(final, outpath, "fasta")
+            print("wrote", outpath)
 
-            # Optional fix header
-            record = next(SeqIO.parse(consensus_path, "fasta"))
-            record.id = cluster_id + ":" + ",".join(read_ids)
-            record.description = ""
-            SeqIO.write(record, consensus_path, "fasta")
 
-        # Cleanup
-        remove(ref_fasta)
-        remove(reads_fasta)
-        remove(paf_path)
-
-    print(f"Consensus generation complete.")
+# def determine_consensus(**kwargs):
+#     # For each file of clustered full sequences, determine a single consensus sequence
+#     clusters = glob("tmp/clusters/cluster_*.fasta")
+#     for fn in clusters:
+#         cluster_id = fn.split('_')[-1].split('.')[0]
+#         consensus_path = f"tmp/consensus/cluster_{cluster_id}_consensus.fasta"
+#
+#         # assumme everything assigned here already belongs in the correct cluster, just want to determine consensus
+#         cmd = ["vsearch", "--cluster_fast", fn,
+#             "--id", "0.8",
+#             "--threads", str(kwargs['threads']),
+#             "--consout", consensus_path,
+#                "--clusterout_sort",
+#                "--gapopen", "1",
+#                "--gapext", "2",
+#                "--mismatch", "-2",
+#                ]
+#
+#         subprocess.run(cmd,
+#                        check=True,
+#                        stdout=subprocess.DEVNULL,
+#                        stderr=subprocess.DEVNULL)
+#
+#     print(f"Consensus generation complete.")
 

@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from Bio import SeqIO
 
 def import_cupy_numpy(print_note=False):
     gpu_available = False
@@ -158,10 +159,31 @@ pairs = unique_pairs
 def reverse_complement(seq):
     return ''.join(degenerate_complement[base] for base in reversed(seq))
 
-def write_fasta(sequences, filename):
-    with open(filename, "w") as f:
-        for i, seq in enumerate(sequences):
-            f.write(f">{i}\n{seq}\n")
+
+def write_fasta(sequences, barcode_fn, full_fn, filtered_fn):
+    # if synthetic data read from fastq for filtering
+    if full_fn.endswith('.pkl'):
+        full_fn = full_fn.replace('.pkl', '.fastq')
+
+    # build index -> barcode mapping
+    idx_to_barcode = {int(i): s for i, s in sequences}
+
+    # write barcode fasta
+    with open(barcode_fn, "w") as bf:
+        for idx, seq in idx_to_barcode.items():
+            bf.write(f">{idx}\n{seq}\n")
+
+    # stream through the full fastq and select matching indices
+    matched_records = []
+    for i, rec in enumerate(SeqIO.parse(full_fn, "fastq")):
+        if i in idx_to_barcode.keys():
+            matched_records.append(rec)
+
+    # write filtered full reads with qualities preserved
+    SeqIO.write(matched_records, filtered_fn, "fasta")
+    print(f"Wrote {len(matched_records)} barcodes to {barcode_fn}")
+    print(f"Wrote {len(matched_records)} full reads to {filtered_fn}")
+
 
 def write_fastq(sequences, filename, qualities=None, headers=None):
     with open(filename, "w") as f:

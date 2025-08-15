@@ -47,7 +47,7 @@ def score_sequences(sequence_array, reference_array, sum_sequences,
         probs = probs[np.newaxis]
         reformat = True
     score = compute_adjacency_score(correct, probs,
-                                                        max_run=3, squared_scores=False)
+                                                        max_run=5, squared_scores=False)
     if reformat:
         score = score[0]
 
@@ -346,10 +346,10 @@ def find_best_rolls_batch(seqs, refs, match_multiplier, indel_penalty):
     # Compute adjacency scores (batched)
     wins = scores > 0
     probs = np.nan_to_num(refs.sum(axis=-1)[0], nan=1)[np.newaxis, np.newaxis]
-    adjacency_matrix = compute_adjacency_score(wins, probs, max_run=3, squared_scores=False).sum(axis=-1)
+    adjacency_matrix = compute_adjacency_score(wins, probs, max_run=5, squared_scores=False).sum(axis=-1)
 
     # Smooth across roll axis
-    smoothed = gaussian_filter1d(adjacency_matrix, sigma=1, axis=1)
+    smoothed = gaussian_filter1d(adjacency_matrix, sigma=2, axis=1)
 
     # Pick best roll per sequence
     n_strands, n_rolls, n_seqs = smoothed.shape

@@ -178,14 +178,14 @@ if __name__ == '__main__':
                         help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate samplign')
 
     # Parameters defining what syndata to generate
-    parser.add_argument('--duplication_rate', type=float, default=50,
+    parser.add_argument('--duplication_rate', type=float, default=100,
                         help='Analogous to sequencing depth')
-    parser.add_argument('--barcodes_per_variant', type=float, default=5)
-    parser.add_argument('--num_variants', type=float, default=100)
+    parser.add_argument('--barcodes_per_variant', type=float, default=1)
+    parser.add_argument('--num_variants', type=float, default=1)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='MBDMKHVKYVDYRBHRSHDSMDBMWBVWSDHSRHBRWBVWKVHKMBDMYDVYWVBWMBDM',
+                        default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
@@ -196,9 +196,9 @@ if __name__ == '__main__':
                         help='Sequence that barcodes will be mapped to')
     parser.add_argument('--left_coding_flank', type=str, default='CTGCTATCGT',
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--right_coding_flank', type=str, default='TATCAGAGTC',
+    parser.add_argument('--right_coding_flank', type=str, default='ATCTAGCATC',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/syndataC')
+    parser.add_argument('--fn', type=str, default='syndata/single')
 
     args = parser.parse_args()
 

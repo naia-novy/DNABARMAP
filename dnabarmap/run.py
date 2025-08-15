@@ -10,21 +10,24 @@ from dnabarmap.map import determine_mapping
 
 
 def main(**kwargs):
-    makedirs('tmp/outputs', exist_ok=True)
     initial_time = time.time()
     kwargs['input_fn'] = kwargs['fastq_fn']
-    aln_out = kwargs['input_fn'].replace('.fastq', '_barcodes.fasta').replace('.pkl', '_barcodes.fasta')
+    barcode_out = 'tmp/'+kwargs['input_fn'].split('/')[-1].split('.')[0] + '_barcodes.fasta'
+    filtered_fn = barcode_out.replace('_barcodes.fasta', '_filtered.fasta')
+    kwargs['output_fn'] = barcode_out
+    kwargs['filtered_fn'] = filtered_fn
 
     # Extract and align barcodes using approximate alignment to degenerate reference
     print('Aligning barcodes...')
     align_start_time = time.time()
-    align(output_fn=aln_out, **kwargs)
+    align(**kwargs)
     align_time = time.time() - align_start_time
     print(f'Finished aligning and extracting barcodes in {round(align_time / 60, 1)} minutes\n')
 
     # Adjustment if using synthetic data for validation
-    kwargs['fastq_fn'] =  kwargs['fastq_fn'] if  kwargs['fastq_fn'].endswith('.fastq') else  kwargs['fastq_fn'].replace('.pkl', '.fastq')
-    kwargs['input_fn'] = kwargs['fastq_fn']
+    # kwargs['fastq_fn'] =  kwargs['fastq_fn'] if  kwargs['fastq_fn'].endswith('.fastq') else  kwargs['fastq_fn'].replace('.pkl', '.fastq')
+    # kwargs['input_fn'] = kwargs['fastq_fn']
+    kwargs['fasta_fn'] = filtered_fn
 
     # Cluster aligned barcodes using vsearch
     print('Clustering barcodes...')
@@ -57,47 +60,47 @@ def cli():
     parser = argparse.ArgumentParser()
 
     # Directories and filenaemes
-    parser.add_argument('--fastq_fn', type=str, default='syndata/syndataC.pkl')
+    parser.add_argument('--fastq_fn', type=str, default='syndata/syndataD.pkl')
     parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataC',
+    parser.add_argument("--base_fn", default='syndata/syndataD',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='MBDMKHVKYVDYRBHRSHDSMDBMWBVWSDHSRHBRWBVWKVHKMBDMYDVYWVBWMBDM',
+                        default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
                         help='Degenerate reference for conducting approximate alignment of sequences')
-    parser.add_argument("--left_coding_flank", default='CTGCTATCGT',
+    parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
-    parser.add_argument("--right_coding_flank", default='TATCAGAGTC',
+    parser.add_argument("--right_coding_flank", default='ATCTAGC',
                         help="Right constant sequence of coding region")
 
     # Alignment parameters
-    parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=3,
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--indel_penalty', type=float, default=1.0,
                         help='Additional penalty for each indel')
     parser.add_argument('--match_multiplier', type=float, default=4,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.7,
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
-    parser.add_argument('--max_len', type=int, default=140,
+    parser.add_argument('--max_len', type=int, default=150,
                         help='Shave off ends of sequences over this length for efficiency, '
                              'reccomended to be at least twice length of barcode')
-    parser.add_argument('--buffer', type=int, default=40,
+    parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
     parser.add_argument("--cluster_iterations", type=int, default=5, help="Repeat greedy clustering this "
                                                                           "many times with increasing stringency each iteration")
-    parser.add_argument("--min_sequences", type=int, default=20,
+    parser.add_argument("--min_sequences", type=int, default=10,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=8,
                         help="Number of threads for clustering")
 
-    parser.add_argument("--save_intermediate_files", default=False, action='store_true',
+    parser.add_argument("--save_intermediate_files", default=True, action='store_true',
                         help="Should not delete intermediate files generated during DNABARMAP")
 
     parser.add_argument("--synthetic_data_available", default=False, action='store_true',

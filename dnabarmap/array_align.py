@@ -138,7 +138,7 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
 
     return sequences, headers, data, seq_limit_for_debugging
 
-def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_template, match_multiplier,
+def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size, barcode_template, match_multiplier,
           indel_penalty, patience, synthetic_data_available, minimum_match_fraction, max_len, buffer,
           **kwargs):
     # Load dataset
@@ -153,7 +153,6 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
     reference_array = reference_to_array(barcode_template, sequence_array.shape[1])
     reference_array = np.repeat(reference_array[np.newaxis], len(sequence_array), axis=0)
     reference_array = np.transpose(reference_array[:, :, 0], (0, 2, 1))
-    patience_counter = np.zeros((reference_array.shape[0]), dtype=int)
 
     # Generate initial scores
     current_vals = score_sequences(sequence_array, reference_array, True, match_multiplier, indel_penalty)
@@ -233,10 +232,13 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
         scores.append(score.sum(axis=-1))  # sum over sequence length
     scores = np.concatenate(scores, axis=0)
 
-    decoded_sequences = []
-    for test_idx in range(current_vals.shape[0]):
-        decoded_reference, decoded_sequence = decode_alignment(sequence_array[test_idx], reference_array[test_idx], reduce=True)
-        decoded_sequences.append(decoded_sequence)
+    threshold = len(barcode_template) * minimum_match_fraction
+    passing_idxs = np.where(scores > threshold)[0]
+
+    passed_seqs = []
+    for i in passing_idxs:
+        decoded_reference, decoded_seq = decode_alignment(sequence_array[i], reference_array[i], reduce=True)
+        passed_seqs.append((i, decoded_seq))
 
     if synthetic_data_available:
         print('\nFinal alignment results:')
@@ -246,8 +248,7 @@ def align(input_fn, output_fn, seq_limit_for_debugging, batch_size, barcode_temp
     print(round(100*sum(map(lambda x: x > len(barcode_template)*minimum_match_fraction, scores))/len(scores), 1))
 
     # Save alignments
-    print('Saving alignments to: ', output_fn)
-    write_fasta(decoded_sequences, output_fn)
+    write_fasta(passed_seqs, output_fn, input_fn, filtered_fn)
 
 
 if __name__ == '__main__':
@@ -266,9 +267,9 @@ if __name__ == '__main__':
                         help='Additional penalty for each indel')
     parser.add_argument('--match_multiplier', type=float, default=4,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--max_len', type=int, default=140,
+    parser.add_argument('--max_len', type=int, default=150,
                         help='Remove sequences over this length for efficiency')
-    parser.add_argument('--buffer', type=int, default=40,
+    parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode')
     parser.add_argument('--barcode_template', type=str,
                             # default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
@@ -277,7 +278,6 @@ if __name__ == '__main__':
     parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
                         help='Require at least this fraction of bases to match any reference possiblity')
     parser.add_argument('--input_fn', type=str, default='./syndata/syndataC.pkl')
-    parser.add_argument('--output_fn', type=str, default='./syndata/syndataC_barcodes.fasta')
 
     args = parser.parse_args()
     assert args.match_multiplier > 0
@@ -289,6 +289,10 @@ if __name__ == '__main__':
 
         pr = cProfile.Profile()
         pr.enable()
+
+
+    args.output_fn = args.input_fn.replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
+    args.filtered_fn = args.output_fn.replace('barcodes.fasta', 'filtered.fasta')
 
     # Run alignment
     align(**vars(args))

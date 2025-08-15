@@ -21,11 +21,10 @@ setup(
     # Package contents
     packages=find_packages(),
     include_package_data=True,
-    python_requires='>=3.11',
+    python_requires='>=3.10',
 
     # Dependencies
     install_requires=parse_requirements(),
-
     entry_points={
         'console_scripts': [
             'dnabarmap = dnabarmap.run:cli',
