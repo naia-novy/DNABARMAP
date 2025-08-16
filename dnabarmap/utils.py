@@ -160,7 +160,7 @@ def reverse_complement(seq):
     return ''.join(degenerate_complement[base] for base in reversed(seq))
 
 
-def write_fasta(sequences, barcode_fn, full_fn, filtered_fn):
+def write_full_fastq(sequences, barcode_fn, full_fn, filtered_fn):
     # if synthetic data read from fastq for filtering
     if full_fn.endswith('.pkl'):
         full_fn = full_fn.replace('.pkl', '.fastq')
@@ -180,17 +180,17 @@ def write_fasta(sequences, barcode_fn, full_fn, filtered_fn):
             matched_records.append(rec)
 
     # write filtered full reads with qualities preserved
-    SeqIO.write(matched_records, filtered_fn, "fasta")
+    SeqIO.write(matched_records, filtered_fn, "fastq")
     print(f"Wrote {len(matched_records)} barcodes to {barcode_fn}")
     print(f"Wrote {len(matched_records)} full reads to {filtered_fn}")
 
 
-def write_fastq(sequences, filename, qualities=None, headers=None):
+def write_synthetic_fastq(sequences, filename, qualities=None, headers=None):
     with open(filename, "w") as f:
         for i, seq in enumerate(sequences):
             header = headers[i] if headers is not None else str(i)
 
-            f.write(f"@{header}\n")
+            f.write(f"@{header}\tmv:syntheticdata\n")
             f.write(f"{seq}\n")
             f.write("+\n")
 

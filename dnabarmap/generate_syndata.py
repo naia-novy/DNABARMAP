@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from os import makedirs
 
 from dnabarmap.generate import generate_sequence, generate_random_barcodes
-from dnabarmap.utils import degenerate_map, int_to_degenerate, generate_random_mut, write_fastq
+from dnabarmap.utils import degenerate_map, int_to_degenerate, generate_random_mut, write_synthetic_fastq
 import dnabarmap.simulate as sim
 
 seed = 100
@@ -154,7 +154,7 @@ def main(barcode_template, coding_sequence, left_coding_flank, right_coding_flan
             qualities += out[-1]
 
     data = pd.DataFrame(data, columns=['reference', 'synthetic_sequence', 'barcode_with_flanks', 'true_barcode', 'variant'])
-    write_fastq(data.synthetic_sequence.to_list(), fastq_fn, qualities=qualities)
+    write_synthetic_fastq(data.synthetic_sequence.to_list(), fastq_fn, qualities=qualities)
 
     data = data.sample(frac=1).reset_index(drop=True)
     data.to_pickle(fasta_fn.replace('.fasta', '.pkl'))
@@ -178,10 +178,10 @@ if __name__ == '__main__':
                         help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate samplign')
 
     # Parameters defining what syndata to generate
-    parser.add_argument('--duplication_rate', type=float, default=100,
+    parser.add_argument('--duplication_rate', type=float, default=50,
                         help='Analogous to sequencing depth')
-    parser.add_argument('--barcodes_per_variant', type=float, default=1)
-    parser.add_argument('--num_variants', type=float, default=1)
+    parser.add_argument('--barcodes_per_variant', type=float, default=10)
+    parser.add_argument('--num_variants', type=float, default=10)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
@@ -198,7 +198,7 @@ if __name__ == '__main__':
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
     parser.add_argument('--right_coding_flank', type=str, default='ATCTAGCATC',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/single')
+    parser.add_argument('--fn', type=str, default='syndata/syndataB')
 
     args = parser.parse_args()
 

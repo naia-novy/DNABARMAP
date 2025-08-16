@@ -18,7 +18,7 @@ def run_vsearch(
     # Step 1: First clustering round
     input_fasta = output_fn
     adj_cluster_iterations = cluster_iterations - 1
-    values = list(np.linspace(0.97, 0.85, adj_cluster_iterations)) + [0.97]
+    values = list(np.linspace(0.95, 0.8, adj_cluster_iterations)) + [0.9]
     for i in range(cluster_iterations):
         out = path.join(cluster_dir, f"consensus_r{i+1}.fasta")
         uc = path.join(cluster_dir, f"clusters_r{i+1}.uc")
@@ -33,10 +33,9 @@ def run_vsearch(
             "--sizeout",
             "--sizein",
             "--clusterout_sort",
-            "--cons_truncate",
-            # "--gapopen", "2",
-            # "--gapext", "4",
-            # "--mismatch", "-4",
+            # "--cons_truncate",
+            "--gapopen", "1000",
+            "--gapext", "1000",
         ]
         print(f"Running clustering iteration {i+1}")
         subprocess.run(cmd,
@@ -54,16 +53,15 @@ def run_vsearch(
         "--threads", str(threads),
         "--uc", final_uc,
         "--sizein",
-        # "--gapopen", "2",
-        # "--gapext", "4",
-        # "--mismatch", "-4",
+        "--gapopen", "1000",
+        "--gapext", "1000",
     ]
     subprocess.run(cmd,
                    check=True,
                    stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)
 
-def save_full_seqs(fasta_fn, min_sequences, cluster_iterations, seq_limit_for_debugging=None, **kwargs):
+def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for_debugging=None, **kwargs):
     # Using cluster information, save all full seqs for a given cluster to a file
     if seq_limit_for_debugging is None:
         seq_limit_for_debugging = np.inf
@@ -100,8 +98,8 @@ def save_full_seqs(fasta_fn, min_sequences, cluster_iterations, seq_limit_for_de
 
     # Group full sequences for clustering
     clustered_sequences = defaultdict(list)
-    with open(fasta_fn) as handle:
-        for seq_idx, record in enumerate(SeqIO.parse(handle, "fasta")):
+    with open(filtered_fn) as handle:
+        for seq_idx, record in enumerate(SeqIO.parse(handle, "fastq")):
             if seq_idx >= seq_limit_for_debugging:
                 break
             id_ = record.id
@@ -112,9 +110,9 @@ def save_full_seqs(fasta_fn, min_sequences, cluster_iterations, seq_limit_for_de
             clustered_sequences[cluster_id].append(record)
 
     for cluster, seqs in clustered_sequences.items():
-        with open(f"tmp/clusters/cluster_{cluster}.fasta", "w") as f:
+        with open(f"tmp/clusters/cluster_{cluster}.fastq", "w") as f:
             for seq in seqs:
-                SeqIO.write(seq, f, "fasta")
+                SeqIO.write(seq, f, "fastq")
 
 def resolve_final_cluster(seq_id, expansion_maps):
     # Iterate over expansions from low to high. When reading from full fasta, use index to map through expansions and

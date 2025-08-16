@@ -12,8 +12,9 @@ from dnabarmap.map import determine_mapping
 def main(**kwargs):
     initial_time = time.time()
     kwargs['input_fn'] = kwargs['fastq_fn']
+    kwargs['fastq_fn'] = kwargs['input_fn'].replace('.pkl', '.fastq') # in case synthetic data
     barcode_out = 'tmp/'+kwargs['input_fn'].split('/')[-1].split('.')[0] + '_barcodes.fasta'
-    filtered_fn = barcode_out.replace('_barcodes.fasta', '_filtered.fasta')
+    filtered_fn = barcode_out.replace('_barcodes.fasta', '_filtered.fastq')
     kwargs['output_fn'] = barcode_out
     kwargs['filtered_fn'] = filtered_fn
 
@@ -60,11 +61,11 @@ def cli():
     parser = argparse.ArgumentParser()
 
     # Directories and filenaemes
-    parser.add_argument('--fastq_fn', type=str, default='syndata/syndataD.pkl')
+    parser.add_argument('--fastq_fn', type=str, default='syndata/single.pkl')
     parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataD',
+    parser.add_argument("--base_fn", default='syndata/single',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
@@ -77,28 +78,31 @@ def cli():
                         help="Right constant sequence of coding region")
 
     # Alignment parameters
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--indel_penalty', type=float, default=1.0,
                         help='Additional penalty for each indel')
     parser.add_argument('--match_multiplier', type=float, default=4,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.8,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
     parser.add_argument('--max_len', type=int, default=150,
                         help='Shave off ends of sequences over this length for efficiency, '
                              'reccomended to be at least twice length of barcode')
-    parser.add_argument('--buffer', type=int, default=30,
+    parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
-    parser.add_argument("--cluster_iterations", type=int, default=5, help="Repeat greedy clustering this "
+    parser.add_argument("--cluster_iterations", type=int, default=10, help="Repeat greedy clustering this "
                                                                           "many times with increasing stringency each iteration")
-    parser.add_argument("--min_sequences", type=int, default=10,
+    parser.add_argument("--min_sequences", type=int, default=3,
                         help="Minimum num_sequences for cluster to be valid >=")
-    parser.add_argument("--threads", type=int, default=8,
+    parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
+    parser.add_argument("--medaka_model", type=str, default='default',
+                        help="Which model to use for Medaka consensus refining,"
+                             "if none provided will skip medaka and use consensus from vsearch")
 
     parser.add_argument("--save_intermediate_files", default=True, action='store_true',
                         help="Should not delete intermediate files generated during DNABARMAP")
@@ -146,7 +150,7 @@ def cli():
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
-    args.seq_limit_for_debugging = None  # 10000
+    args.seq_limit_for_debugging = 15  # 10000
 
     main(**vars(args))
 

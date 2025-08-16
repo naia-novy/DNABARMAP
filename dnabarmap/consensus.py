@@ -1,59 +1,73 @@
-from Bio import SeqIO
-import subprocess, tempfile
+import subprocess
 from glob import glob
-import numpy as np
+import shutil
+from os import makedirs
+from Bio import SeqIO
 
+def determine_consensus(medaka_model, threads, **kwargs):
+    if medaka_model == 'default':
+        true_medaka_model = None
+    else:
+        true_medaka_model = medaka_model
 
-def determine_consensus(**kwargs):
-    for fn in glob("tmp/clusters/cluster_*.fasta"):
+    makedirs("tmp/consensus/medaka", exist_ok=True)
+    makedirs("tmp/consensus/draft", exist_ok=True)
+    # Draft consesnus stage with vsearch
+    clusters = glob("tmp/clusters/cluster_*.fastq")
+    for fn in clusters:
         cluster_id = fn.split('_')[-1].split('.')[0]
-        outpath = f"tmp/consensus/cluster_{cluster_id}_consensus.fasta"
+        draft_path = f"tmp/consensus/cluster_{cluster_id}_draft.fasta"
+        consensus_path = f"tmp/consensus/medaka/cluster_{cluster_id}_consensus.fasta"
 
-        recs = list(SeqIO.parse(fn, "fasta"))
-        if not recs:
-            print("skip empty", fn);
-            continue
+        # assumme everything assigned here already belongs in the correct cluster, just want to determine consensus
+        cmd = ["vsearch", "--cluster_size", fn,
+            "--id", "0.7",
+            "--threads", str(threads),
+            "--consout", draft_path,
+               "--clusterout_sort",
+               "--gapopen", "2",
+               "--gapext", "0",
+               "--mismatch", "-2",
+               "--match", "5",
+               ]
 
-        with tempfile.TemporaryDirectory() as temp:
-            aln = temp + "/aln.fasta"
-            subprocess.run(["mafft", "--localpair", "--maxiterate", "1000", "--retree", "2", fn],
-                           stdout=open(aln, "w"), stderr=subprocess.DEVNULL, check=True)
-            plurality = max(1, np.ceil(len(recs) * 0.5))
-            cons_out = temp + "/cons.fasta"
+        subprocess.run(cmd,
+                       check=True,
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
 
-            plurality = 1
-            subprocess.run(["cons", "-sequence", aln, "-outseq", cons_out,
-                            "-name", f"consensus_{cluster_id}", "-plurality", str(plurality), "-auto"],
-                           check=True)
-            final = next(SeqIO.parse(cons_out, "fasta"))
-            final.id = f"consensus_{cluster_id}";
-            final.description = ""
-            SeqIO.write(final, outpath, "fasta")
-            print("wrote", outpath)
+        # Make file with only first (best) consensus from vsearch
+        first_draft = draft_path.replace('.fasta', '_first.fasta')
+        with open(draft_path) as handle:
+            first_record = next(SeqIO.parse(handle, "fasta"))
+            with open(first_draft, "w") as out_handle:
+                SeqIO.write(first_record, out_handle, "fasta")
 
+        if medaka_model is not None:
+            # Refine stage with Medaka
+            model_line = '' if true_medaka_model is None else f"-m {true_medaka_model}"
+            cmd = ["medaka_consensus", "-i", fn,
+                   "-d", first_draft,
+                   "-t", str(threads),
+                   "-o", consensus_path,
+                   '-f', '-x',
+                   model_line]
 
-# def determine_consensus(**kwargs):
-#     # For each file of clustered full sequences, determine a single consensus sequence
-#     clusters = glob("tmp/clusters/cluster_*.fasta")
-#     for fn in clusters:
-#         cluster_id = fn.split('_')[-1].split('.')[0]
-#         consensus_path = f"tmp/consensus/cluster_{cluster_id}_consensus.fasta"
-#
-#         # assumme everything assigned here already belongs in the correct cluster, just want to determine consensus
-#         cmd = ["vsearch", "--cluster_fast", fn,
-#             "--id", "0.8",
-#             "--threads", str(kwargs['threads']),
-#             "--consout", consensus_path,
-#                "--clusterout_sort",
-#                "--gapopen", "1",
-#                "--gapext", "2",
-#                "--mismatch", "-2",
-#                ]
-#
-#         subprocess.run(cmd,
-#                        check=True,
-#                        stdout=subprocess.DEVNULL,
-#                        stderr=subprocess.DEVNULL)
-#
-#     print(f"Consensus generation complete.")
+            subprocess.run(cmd,
+                           check=True,
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+
+            final_path = consensus_path.replace("medaka/", "")
+            shutil.move(consensus_path + '/consensus.fasta', final_path)
+            draft_files = glob('tmp/consensus/*_draft*fasta*')
+            for f in draft_files:
+                shutil.move(f, f.replace('/consensus/', '/consensus/draft/'))
+        else:
+            final_path = consensus_path.replace("medaka/", "")
+            shutil.move(draft_path, final_path)
+
+        print(fn)
+
+    print(f"Consensus generation complete.")
 

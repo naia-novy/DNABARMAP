@@ -248,7 +248,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     print(round(100*sum(map(lambda x: x > len(barcode_template)*minimum_match_fraction, scores))/len(scores), 1))
 
     # Save alignments
-    write_fasta(passed_seqs, output_fn, input_fn, filtered_fn)
+    write_full_fastq(passed_seqs, output_fn, input_fn, filtered_fn)
 
 
 if __name__ == '__main__':
@@ -292,7 +292,7 @@ if __name__ == '__main__':
 
 
     args.output_fn = args.input_fn.replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
-    args.filtered_fn = args.output_fn.replace('barcodes.fasta', 'filtered.fasta')
+    args.filtered_fn = args.output_fn.replace('barcodes.fasta', 'filtered.fastq')
 
     # Run alignment
     align(**vars(args))
