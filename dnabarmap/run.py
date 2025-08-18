@@ -59,16 +59,16 @@ def cli():
     parser = argparse.ArgumentParser()
 
     # Directories and filenaemes
-    parser.add_argument('--fastq_fn', type=str, default='syndata/single.pkl')
+    parser.add_argument('--fastq_fn', type=str, default='syndata/syndataA.pkl')
     parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/single',
+    parser.add_argument("--base_fn", default='syndata/syndataA',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
+                        default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR',
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
@@ -76,25 +76,23 @@ def cli():
                         help="Right constant sequence of coding region")
 
     # Alignment parameters
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up during alignment')
-    parser.add_argument('--indel_penalty', type=float, default=3.0,
-                        help='Additional penalty for each indel')
-    parser.add_argument('--match_multiplier', type=float, default=2,
+    parser.add_argument('--match_multiplier', type=float, default=5,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
     parser.add_argument('--minimum_match_fraction', type=float, default=0.8,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
-    parser.add_argument('--max_len', type=int, default=150,
+    parser.add_argument('--max_len', type=int, default=180,
                         help='Shave off ends of sequences over this length for efficiency, '
                              'reccomended to be at least twice length of barcode')
-    parser.add_argument('--buffer', type=int, default=40,
+    parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
     parser.add_argument("--cluster_iterations", type=int, default=10, help="Repeat greedy clustering this "
                                                                           "many times with increasing stringency each iteration")
-    parser.add_argument("--min_sequences", type=int, default=3,
+    parser.add_argument("--min_sequences", type=int, default=10,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
@@ -148,7 +146,7 @@ def cli():
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
-    args.seq_limit_for_debugging = 15  # 10000
+    args.seq_limit_for_debugging = None # 10000
 
     main(**vars(args))
 

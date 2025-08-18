@@ -26,8 +26,7 @@ def reference_to_array(reference, max_len=None):
     return ref[:, np.newaxis, :]
 
 
-def score_sequences(sequence_array, reference_array,
-                    match_multiplier=1.0, indel_penalty=0.0, binary=False):
+def score_sequences(sequence_array, reference_array, match_multiplier):
     # Score sequences by rewarding alignments that have long stretches of adjacent matches
     ref_mask = (reference_array != 6) & (reference_array != 0)
     seq_mask = sequence_array != 0
@@ -35,31 +34,12 @@ def score_sequences(sequence_array, reference_array,
     seq_array = sequence_array * seq_mask
 
     valid_indices = np.logical_and(~np.isnan(ref_array).any(axis=-1), ~np.isnan(seq_array).any(axis=-1))
-    indel_penalty = -abs(indel_penalty)
-
-    score = compute_adjacency_score(sequence_array, reference_array, max_run=10)
-
-    if len(reference_array.shape) == len(sequence_array.shape) -1:
-        reference_array = np.broadcast_to(reference_array, sequence_array.shape)
-    indel_mask = ((sequence_array == 6) | (reference_array == 6)) & valid_indices[..., None]
-    indel_mask = np.any(indel_mask, axis=-1)
-
+    score = compute_adjacency_score(sequence_array, reference_array, max_run=5, match_multiplier=match_multiplier)
     score = np.where(valid_indices, score, np.nan)
 
-    if binary:
-        score = (score > 0).astype(int)
-        return score
-    else:
-        score[indel_mask] = indel_penalty
-        return score
+    return score
 
-
-def score_sequences_simple(sequence_array, reference_array,
-                                match_multiplier=1.0, indel_penalty=0.0):
-    # Precompute constants
-    match_multiplier = abs(match_multiplier)
-    indel_penalty = -abs(indel_penalty)
-
+def score_sequences_simple(sequence_array, reference_array):
     # Ensure reference shape matches
     if reference_array.ndim == sequence_array.ndim - 1:
         reference_array = np.broadcast_to(reference_array, sequence_array.shape)
@@ -82,31 +62,23 @@ def score_sequences_simple(sequence_array, reference_array,
     possibilities = np.clip(np.sum(ref_array, axis=-1), 1e-8, None)
 
     # Base score
-    score = (correct / possibilities) * match_multiplier
-
-    # Indel mask
-    indel_mask = np.any((sequence_array == 6) | (reference_array == 6), axis=-1)
+    score = (correct / possibilities)
 
     # Apply NaN for invalid
     score = np.where(valid_indices, score, np.nan)
 
-    score[indel_mask] = indel_penalty
-
     return score
 
-
-
-
-def compute_adjacency_score(seqs, refs, max_run, match_multiplier=1.0):
+def compute_adjacency_score(seqs, refs, max_run, match_multiplier):
     probs = refs.sum(axis=-1)[..., np.newaxis]
     wins = np.logical_and(seqs == refs,  seqs != 0)
     scores = wins / probs
 
     zero_mask = np.logical_or(np.isnan(refs), np.isnan(seqs))
     indel_mask = np.logical_or(seqs == 6, refs == 6)
+    scores[indel_mask] = 0.01 # Add small smoothing factor for multiplication chains
     scores[zero_mask] = 0.0
-    scores[indel_mask] = 0.01 #0.25
-    scores = scores.sum(axis=-1) ** match_multiplier
+    scores = scores.sum(axis=-1) * match_multiplier
 
     if len(scores.shape) == 4:
         d, r, E, B = scores.shape
@@ -155,86 +127,16 @@ def prepare_cumsums(arr, A, B, relevant_range):
     batch_size, seq_len = sub_center.shape
     cumsum_center = np.zeros((batch_size, seq_len + 1))
     cumsum_center[:, 1:] = np.cumsum(sub_center, axis=-1)
-    cumsum_flank = np.zeros_like(cumsum_center)
-    if a * b > 0:
-        cumsum_flank = cumsum_center.copy()
-    else:
-        diff = a + b
-        if abs(a) >= abs(b):
-            new_a, new_b = diff, 0
-        else:
-            new_a, new_b = 0, diff
-        A2 = int(np.where(relevant_range == new_a)[0][0])
-        B2 = int(np.where(relevant_range == new_b)[0][0])
-        sub_flank = arr[A2, B2]
-        cumsum_flank[:, 1:] = np.cumsum(sub_flank, axis=-1)
-    return cumsum_center, cumsum_flank, a, b
-#
-# def best_single_interval(arr, A, B, relevant_range, valid, valid_bound,
-#                          max_patience, min_len=0, indel_penalty=0.0):
-#     # Extract the best combination of pairwise shifts that improves the score
-#     batch_size, seq_len = valid.shape
-#
-#     cumsum_center, cumsum_flank, a, b = prepare_cumsums(arr, A, B, relevant_range)
-#     starts, ends = generate_intervals(seq_len, min_len, a, b, valid_bound)
-#
-#     interval_sums = np.subtract(cumsum_center[:, ends], cumsum_center[:, starts])
-#     left_flank_starts = np.clip(starts - abs(a), 0, seq_len)
-#     left_flank_ends = np.clip(starts, 0, seq_len)
-#     right_flank_starts = np.clip(ends, 0, seq_len)
-#     right_flank_ends = np.clip(ends + abs(b), 0, seq_len)
-#
-#     left_flank = np.subtract(cumsum_flank[:, left_flank_ends], cumsum_flank[:, left_flank_starts])
-#     right_flank = np.subtract(cumsum_flank[:, right_flank_ends], cumsum_flank[:, right_flank_starts])
-#
-#     flank_sums = np.add(left_flank, right_flank)
-#
-#     center_mean = interval_sums
-#     flank_mean  = flank_sums
-#
-#     vb_t = np.transpose(valid_bound, (1, 0))  # shape: (L+1, B)
-#     valid_starts = vb_t[starts].T  # shape: (B, num_intervals)
-#     valid_ends = vb_t[ends].T
-#
-#     scores = np.full((batch_size, starts.shape[0]), -np.inf)
-#     raw_score = np.add(center_mean, flank_mean)
-#     pen = indel_penalty * (abs(a) + abs(b))
-#     valid = valid_starts & valid_ends
-#     np.copyto(scores, raw_score - pen, where=valid)
-#
-#     # Return top `max_patience` per batch
-#     if max_patience == 1:
-#         # trivial top-1 case
-#         best_idx = np.argmax(scores, axis=1)   # shape (batch_size,)
-#         starts_out = starts[best_idx]
-#         ends_out   = ends[best_idx]
-#         gains_out  = scores[np.arange(batch_size), best_idx]
-#         # Return as 2D arrays with trailing dim = 1 for consistency
-#         return (starts_out[:,None],
-#                 ends_out[:,None],
-#                 gains_out[:,None])
-#     else:
-#         topk_part = np.argpartition(scores, -max_patience, axis=1)[:, -max_patience:]  # (B, K)
-#         top_scores = np.take_along_axis(scores, topk_part, axis=1)                      # (B, K)
-#         sort_order = np.argsort(-top_scores, axis=1, kind="stable")                    # (B, K)
-#         sorted_indices = np.take_along_axis(topk_part, sort_order, axis=1)             # (B, K)
-#
-#         s1s = starts[sorted_indices]
-#         s2s = ends[sorted_indices]
-#         gains = np.take_along_axis(scores, sorted_indices, axis=1)
-#         return s1s, s2s, gains  # each (B, K)
 
+    return cumsum_center, a, b
 
-def best_single_interval(arr, A, B, relevant_range, valid, valid_bound,
-                         max_patience, min_len=1, indel_penalty=0.0):
+def best_single_interval(arr, A, B, relevant_range, valid, valid_bound, min_len=1):
     # Extract the best combination of pairwise shifts that improves the score
     batch_size, seq_len = valid.shape
 
-    cumsum_center, cumsum_flank, a, b = prepare_cumsums(arr, A, B, relevant_range)
+    cumsum_center, a, b = prepare_cumsums(arr, A, B, relevant_range)
     starts, ends = generate_intervals(seq_len, min_len, a, b, valid_bound)
     interval_sums = np.subtract(cumsum_center[:, ends], cumsum_center[:, starts])
-    # size = ends - starts + 1
-    # interval_sums = np.divide(interval_sums, size)
 
     vb_t = np.transpose(valid_bound, (1, 0))  # shape: (L+1, B)
     valid_starts = vb_t[starts].T  # shape: (B, num_intervals)
@@ -242,32 +144,18 @@ def best_single_interval(arr, A, B, relevant_range, valid, valid_bound,
 
     scores = np.full((batch_size, starts.shape[0]), -np.inf)
     raw_score = interval_sums
-    pen = indel_penalty * (abs(a) + abs(b))
     valid = valid_starts & valid_ends
-    np.copyto(scores, raw_score - pen, where=valid)
+    np.copyto(scores, raw_score, where=valid)
 
     # Return top `max_patience` per batch
-    if max_patience == 1:
-        # trivial top-1 case
-        best_idx = np.argmax(scores, axis=1)   # shape (batch_size,)
-        starts_out = starts[best_idx]
-        ends_out   = ends[best_idx]
-        gains_out  = scores[np.arange(batch_size), best_idx]
-        # Return as 2D arrays with trailing dim = 1 for consistency
-        return (starts_out[:,None],
-                ends_out[:,None],
-                gains_out[:,None])
-    else:
-        topk_part = np.argpartition(scores, -max_patience, axis=1)[:, -max_patience:]  # (B, K)
-        top_scores = np.take_along_axis(scores, topk_part, axis=1)                      # (B, K)
-        sort_order = np.argsort(-top_scores, axis=1, kind="stable")                    # (B, K)
-        sorted_indices = np.take_along_axis(topk_part, sort_order, axis=1)             # (B, K)
-
-        s1s = starts[sorted_indices]
-        s2s = ends[sorted_indices]
-        gains = np.take_along_axis(scores, sorted_indices, axis=1)
-        return s1s, s2s, gains  # each (B, K)
-
+    best_idx = np.argmax(scores, axis=1)   # shape (batch_size,)
+    starts_out = starts[best_idx]
+    ends_out   = ends[best_idx]
+    gains_out  = scores[np.arange(batch_size), best_idx]
+    # Return as 2D arrays with trailing dim = 1 for consistency
+    return (starts_out[:,None],
+            ends_out[:,None],
+            gains_out[:,None])
 
 def get_precise_topk(scores: np.ndarray, patience: np.ndarray) -> np.ndarray:
     # Precise (tie breaking) of top k wins for tradeoff of efficiency and accuracy
@@ -307,10 +195,10 @@ def expand_bounds(mask, n):
     return expanded
 
 
-def find_suggestions(seqs, refs, match_multiplier, indel_penalty, patience, valid_bound):
+def find_suggestions(seqs, refs, match_multiplier, patience, valid_bound):
     # Wrapper to compare sequences and references and make suggestions for where indels should be made
-    max_shifts = [1,2,3,4,5]
-    ps = [1/i for i in max_shifts]
+    max_shifts = [1,2,3]
+    ps = [(1/i)**2 for i in max_shifts]
     ps = [i/sum(ps) for i in ps]
     max_shift = np.random.choice(max_shifts, p=ps, size=1)[0]
     valid_bound = expand_bounds(valid_bound, max_shift)
@@ -323,17 +211,10 @@ def find_suggestions(seqs, refs, match_multiplier, indel_penalty, patience, vali
     result = np.zeros((n_rolls, n_seqs, seq_len))
     valid_indices = ~np.isnan(refs).any(axis=-1)
 
-    # score_type = np.random.choice(['simple', 'consecutive'], p=[0.5, 0.5], size=1)[0]
-    score_type = 'simple'
     for idx, shift in enumerate(relevant_range):
         rolled = np.roll(seqs, shift=shift, axis=1)
-
-        if score_type == 'simple':
-            sc = score_sequences_simple(rolled, refs, match_multiplier, indel_penalty)
-        else:
-            sc = score_sequences(rolled, refs, match_multiplier, indel_penalty)
-
-        sc = np.nan_to_num(sc, nan=0)
+        sc = score_sequences_simple(rolled, refs)
+        sc = np.nan_to_num(sc*match_multiplier, nan=0)
         result[idx] = np.roll(sc, -shift, axis=-1)
 
     result_mask = np.isnan(result)
@@ -344,17 +225,15 @@ def find_suggestions(seqs, refs, match_multiplier, indel_penalty, patience, vali
     all_pairwise_sums = (diff[:, None] + diff[None, :])/2
 
     pair_indices = [(i, j) for i in range(n_rolls) for j in range(n_rolls) if not (i == j == center_idx)]
-    # pair_indices = [(i, j) for i,j in pair_indices if (i==-j)]
-    max_patience = 1
-    total_candidates = len(pair_indices) * max_patience
+    total_candidates = len(pair_indices)
     all_suggestions = np.full((n_seqs, total_candidates, 5), -np.inf)
 
     for idx, (i, j) in enumerate(pair_indices):
-        s1s, s2s, gains = best_single_interval(all_pairwise_sums, i, j, relevant_range, valid_indices, valid_bound, max_patience,
-                                               min_len=1, indel_penalty=indel_penalty)
+        s1s, s2s, gains = best_single_interval(all_pairwise_sums, i, j, relevant_range, valid_indices,
+                                               valid_bound, min_len=0)
         for batch_idx in range(n_seqs):
-            start = idx * max_patience
-            end = (idx + 1) * max_patience
+            start = idx
+            end = (idx + 1)
             all_suggestions[batch_idx, start:end, 0] = s1s[batch_idx]
             all_suggestions[batch_idx, start:end, 1] = s2s[batch_idx]
             all_suggestions[batch_idx, start:end, 2] = gains[batch_idx]
@@ -368,59 +247,8 @@ def find_suggestions(seqs, refs, match_multiplier, indel_penalty, patience, vali
 
     return best
 
-# def find_suggestions(seqs, refs, match_multiplier, indel_penalty, patience, valid_bound):
-#     # Wrapper to compare sequences and references and make suggestions for where indels should be made
-#     max_shift = 3
-#     relevant_range = np.arange(-max_shift, max_shift + 1, dtype=int)
-#
-#     n_rolls = len(relevant_range)
-#     n_seqs, seq_len, _ = seqs.shape
-#     center_idx = n_rolls // 2
-#
-#     result = np.zeros((n_rolls, n_seqs, seq_len))
-#     valid_indices = ~np.isnan(refs).any(axis=-1)
-#
-#     for idx, shift in enumerate(relevant_range):
-#         rolled = np.roll(seqs, shift=shift, axis=1)
-#         sc = score_sequences_simple(rolled, refs, match_multiplier, indel_penalty)
-#
-#         sc = np.nan_to_num(sc, nan=0)
-#         result[idx] = np.roll(sc, -shift, axis=-1)
-#
-#     result_mask = np.isnan(result)
-#     result[result_mask] = 0
-#
-#     diff = result - result[center_idx]
-#     diff[:, ~valid_indices] = 0.0
-#     all_pairwise_sums = (diff[:, None] + diff[None, :])/2
-#
-#     pair_indices = [(i, j) for i in range(n_rolls) for j in range(n_rolls) if not (i == j == center_idx)]
-#
-#     max_patience = 1
-#     total_candidates = len(pair_indices) * max_patience
-#     all_suggestions = np.full((n_seqs, total_candidates, 5), -np.inf)
-#
-#     for idx, (i, j) in enumerate(pair_indices):
-#         s1s, s2s, gains = best_single_interval(all_pairwise_sums, i, j, relevant_range, valid_indices, valid_bound, max_patience,
-#                                                min_len=0, indel_penalty=indel_penalty)
-#         for batch_idx in range(n_seqs):
-#             start = idx * max_patience
-#             end = (idx + 1) * max_patience
-#             all_suggestions[batch_idx, start:end, 0] = s1s[batch_idx]
-#             all_suggestions[batch_idx, start:end, 1] = s2s[batch_idx]
-#             all_suggestions[batch_idx, start:end, 2] = gains[batch_idx]
-#             all_suggestions[batch_idx, start:end, 3] = relevant_range[i]
-#             all_suggestions[batch_idx, start:end, 4] = relevant_range[j]
-#
-#         # Select the k-th best suggestion per sequence
-#         scores = all_suggestions[:, :, 2]  # shape (B, N)
-#         best_idx = get_precise_topk(scores, np.clip(patience, 0, all_suggestions[:,:,2].shape[1]))  # shape (B,)
-#         best = all_suggestions[np.arange(n_seqs), best_idx]
-#
-#     return best
 
-
-def find_best_rolls_batch(seqs, refs, match_multiplier, indel_penalty):
+def find_best_rolls_batch(seqs, refs, match_multiplier):
     # Parameters
     max_shift = min(50, seqs.shape[2] // 2)
     provided_range = np.arange(-max_shift, max_shift + 1)
@@ -432,12 +260,12 @@ def find_best_rolls_batch(seqs, refs, match_multiplier, indel_penalty):
     for idx, shift in enumerate(provided_range):
         rolled_all[:,idx] = np.roll(seqs, shift=shift, axis=2)
 
-    # adjacency_matrix = compute_consecutive_score(rolled_all, refs, max_run=20, squared_scores=True)
-    adjacency_matrix = compute_adjacency_score(rolled_all, refs[:, np.newaxis], max_run=10)
+    adjacency_matrix = compute_adjacency_score(rolled_all, refs[:, np.newaxis], max_run=5, match_multiplier=match_multiplier)
     adjacency_score = adjacency_matrix.sum(axis=(-1))
 
     # Smooth across roll axis
-    smoothed = gaussian_filter1d(adjacency_score, sigma=2, axis=1)
+    matches = ((rolled_all == refs[:, np.newaxis]) & (rolled_all == 1)).sum(axis=(-1, -2))
+    smoothed = gaussian_filter1d(adjacency_score*matches, sigma=3, axis=1)
 
     # Pick best roll per sequence
     n_strands, n_rolls, n_seqs = smoothed.shape

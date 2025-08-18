@@ -44,7 +44,7 @@ def decode_alignment(sequence, reference=None, reduce=False):
 
     return decoded_sequences
 
-def initialize_sequences(sequences, barcode_template, match_multiplier, indel_penalty, data,
+def initialize_sequences(sequences, barcode_template, match_multiplier, data,
                          synthetic_data_available, seq_limit_for_debugging, max_len, buffer, batch_size, **kwargs):
     # Convert sequences to arrays and do initial approximate alignment
     buffer = int(buffer*0.75)
@@ -77,8 +77,7 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
         rolls, scores = find_best_rolls_batch(
             seq_stacked[:, batch_idx:batch_end],
             ref_stacked[:, batch_idx:batch_end],
-            match_multiplier=match_multiplier,
-            indel_penalty=indel_penalty)
+            match_multiplier=match_multiplier)
 
         score_array[:, batch_idx:batch_end] = scores
         best_rolls_array[:, batch_idx:batch_end] = rolls
@@ -99,6 +98,7 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
 
 def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False):
     # Print alignment to true barcode and barcode reference
+    return
     results = []
     decoded_sequences = []
     for test_idx in indices:
@@ -141,7 +141,7 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
     return sequences, headers, data, seq_limit_for_debugging
 
 def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size, barcode_template, match_multiplier,
-          indel_penalty, patience, synthetic_data_available, minimum_match_fraction, max_len, buffer,
+          patience, synthetic_data_available, minimum_match_fraction, max_len, buffer,
           **kwargs):
     # Load dataset
     assert os.path.exists(input_fn)
@@ -150,7 +150,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     sequences, headers, data, seq_limit_for_debugging = load_data(input_fn, seq_limit_for_debugging, batch_size)
 
     # Initialize sequence, reference, and patience arrays
-    sequence_array = initialize_sequences(sequences, barcode_template, match_multiplier, indel_penalty, data,
+    sequence_array = initialize_sequences(sequences, barcode_template, match_multiplier, data,
                                           synthetic_data_available, seq_limit_for_debugging, max_len, buffer, batch_size)
     reference_array = reference_to_array(barcode_template, sequence_array.shape[1])
     reference_array = np.repeat(reference_array[np.newaxis], len(sequence_array), axis=0)
@@ -159,7 +159,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     # Generate initial scores
     current_vals = np.zeros(sequence_array.shape[0])
     for idx in range(0, sequence_array.shape[0], batch_size):
-        result = score_sequences(sequence_array[idx:batch_size+idx], reference_array[idx:batch_size+idx], match_multiplier, indel_penalty)
+        result = score_sequences(sequence_array[idx:batch_size+idx], reference_array[idx:batch_size+idx], 1)
         current_vals[idx:batch_size+idx] = np.nansum(result, axis=-1)
 
     if synthetic_data_available:
@@ -192,10 +192,10 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
             np.zeros((b, 1), dtype=bool)  # allow end boundary
         ], axis=1)  # shape: (b, seq_len + 1)
 
-        suggestions = find_suggestions(batch_seqs_buf[:b], batch_refs_buf[:b], match_multiplier, indel_penalty, batch_patience, valid_bound)
+        suggestions = find_suggestions(batch_seqs_buf[:b].copy(), batch_refs_buf[:b].copy(), 1, batch_patience, valid_bound)
         aligned_sequences, aligned_references = apply_alignment_vectorized(batch_seqs_buf[:b], batch_refs_buf[:b], suggestions, target_len=sequence_array.shape[1])
         scores = score_sequences(aligned_sequences, aligned_references,
-                               match_multiplier=match_multiplier, indel_penalty=indel_penalty)
+                               match_multiplier=1)
 
         scores = np.nansum(scores, axis=-1)
         # Concatenate sequences along "attempt" dimension, determine best attempt to use based on weighted score
@@ -227,7 +227,6 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
             elif patience_counter[idx] < patience:
                 active.append(idx)
 
-
     # Convert arrays into nucleotide sequences for downstream processing
     scores = []
     for i in range(0, sequence_array.shape[0], batch_size):
@@ -253,6 +252,8 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
 
     print(f'Percent of alignments with at least {minimum_match_fraction} of barcode matching possible reference:')
     print(round(100*sum(map(lambda x: x > len(barcode_template)*minimum_match_fraction, scores))/len(scores), 1))
+    print(np.median(scores))
+    print(np.mean(scores))
 
     # Save alignments
     write_full_fastq(passed_seqs, output_fn, input_fn, filtered_fn)
@@ -268,18 +269,16 @@ if __name__ == '__main__':
 
     # Set alignment parameters
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--patience', type=int, default=10,
+    parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up')
-    parser.add_argument('--indel_penalty', type=float, default=0,
-                        help='Additional penalty for each indel')
-    parser.add_argument('--match_multiplier', type=float, default=1,
+    parser.add_argument('--match_multiplier', type=float, default=5,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
     parser.add_argument('--max_len', type=int, default=180,
                         help='Remove sequences over this length for efficiency')
-    parser.add_argument('--buffer', type=int, default=20,
+    parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode')
     parser.add_argument('--barcode_template', type=str,
-                        default='TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCGATC',
+                        default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR', # TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCGATC
                                            help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--minimum_match_fraction', type=float, default=0.8,
                         help='Require at least this fraction of bases to match any reference possiblity')
