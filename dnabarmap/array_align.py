@@ -39,6 +39,8 @@ def decode_alignment(sequence, reference=None, reduce=False):
         decoded_sequences[1] = ''.join([val for i,val in enumerate(decoded_sequences[1]) if nonred_ref[i] != '-'])
         decoded_sequences[0] = decoded_sequences[0].replace('-', 'N')
         decoded_sequences[1] = decoded_sequences[1].replace('-', 'N')
+        decoded_sequences[1] = ''.join([v for i,v in enumerate(decoded_sequences[1]) if decoded_sequences[0][i] not in ['A', 'T', 'C', 'G']])
+        decoded_sequences[0] = ''.join([i for i in decoded_sequences[0] if i not in ['A', 'T', 'C', 'G']])
 
     return decoded_sequences
 
@@ -46,7 +48,7 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, indel_pe
                          synthetic_data_available, seq_limit_for_debugging, max_len, buffer, batch_size, **kwargs):
     # Convert sequences to arrays and do initial approximate alignment
     buffer = int(buffer*0.75)
-    length_mult = 1.75
+    length_mult = 2
     template_len = len(barcode_template)
     template_len = int(template_len*length_mult)
 
@@ -155,7 +157,11 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     reference_array = np.transpose(reference_array[:, :, 0], (0, 2, 1))
 
     # Generate initial scores
-    current_vals = score_sequences(sequence_array, reference_array, True, match_multiplier, indel_penalty)
+    current_vals = np.zeros(sequence_array.shape[0])
+    for idx in range(0, sequence_array.shape[0], batch_size):
+        result = score_sequences(sequence_array[idx:batch_size+idx], reference_array[idx:batch_size+idx], match_multiplier, indel_penalty)
+        current_vals[idx:batch_size+idx] = np.nansum(result, axis=-1)
+
     if synthetic_data_available:
         report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, range(sequence_array.shape[0]), plot=True)
 
@@ -183,14 +189,15 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
         valid_indices = ~np.isnan(batch_refs_buf[:b]).any(axis=-1)  # (b, seq_len)
         valid_bound = np.concatenate([
             valid_indices,
-            np.ones((b, 1), dtype=bool)  # allow end boundary
+            np.zeros((b, 1), dtype=bool)  # allow end boundary
         ], axis=1)  # shape: (b, seq_len + 1)
 
         suggestions = find_suggestions(batch_seqs_buf[:b], batch_refs_buf[:b], match_multiplier, indel_penalty, batch_patience, valid_bound)
         aligned_sequences, aligned_references = apply_alignment_vectorized(batch_seqs_buf[:b], batch_refs_buf[:b], suggestions, target_len=sequence_array.shape[1])
-        scores = score_sequences(aligned_sequences, aligned_references, sum_sequences=True,
+        scores = score_sequences(aligned_sequences, aligned_references,
                                match_multiplier=match_multiplier, indel_penalty=indel_penalty)
 
+        scores = np.nansum(scores, axis=-1)
         # Concatenate sequences along "attempt" dimension, determine best attempt to use based on weighted score
         best_attempt = np.argmax(scores, axis=0)  # shape: (B,)
 
@@ -261,23 +268,22 @@ if __name__ == '__main__':
 
     # Set alignment parameters
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--patience', type=int, default=3,
+    parser.add_argument('--patience', type=int, default=10,
                         help='How many times to try next best suggestion before giving up')
-    parser.add_argument('--indel_penalty', type=float, default=1,
+    parser.add_argument('--indel_penalty', type=float, default=0,
                         help='Additional penalty for each indel')
-    parser.add_argument('--match_multiplier', type=float, default=4,
+    parser.add_argument('--match_multiplier', type=float, default=1,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--max_len', type=int, default=150,
+    parser.add_argument('--max_len', type=int, default=180,
                         help='Remove sequences over this length for efficiency')
-    parser.add_argument('--buffer', type=int, default=30,
+    parser.add_argument('--buffer', type=int, default=20,
                         help='Expected constant region on the DNA fragment before the barcode')
     parser.add_argument('--barcode_template', type=str,
-                            # default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
-                        default='MBDMKHVKYVDYRBHRSHDSMDBMWBVWSDHSRHBRWBVWKVHKMBDMYDVYWVBWMBDM',
+                        default='TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCGATC',
                                            help='Reference degenerate barcode to align sequences to')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.8,
                         help='Require at least this fraction of bases to match any reference possiblity')
-    parser.add_argument('--input_fn', type=str, default='./syndata/syndataC.pkl')
+    parser.add_argument('--input_fn', type=str, default='./syndata/syndataA.pkl')
 
     args = parser.parse_args()
     assert args.match_multiplier > 0

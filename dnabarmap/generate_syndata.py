@@ -181,11 +181,11 @@ if __name__ == '__main__':
     parser.add_argument('--duplication_rate', type=float, default=50,
                         help='Analogous to sequencing depth')
     parser.add_argument('--barcodes_per_variant', type=float, default=10)
-    parser.add_argument('--num_variants', type=float, default=10)
+    parser.add_argument('--num_variants', type=float, default=1)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='HVWBWRHSRBWRKARHBWSSYKVYMKYRMDSHGBVMRKRYWSSWMWYYSRDWKSYMRYVW',
+                        default='TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCGATC',
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
@@ -198,7 +198,7 @@ if __name__ == '__main__':
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
     parser.add_argument('--right_coding_flank', type=str, default='ATCTAGCATC',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/syndataB')
+    parser.add_argument('--fn', type=str, default='syndata/syndataA')
 
     args = parser.parse_args()
 

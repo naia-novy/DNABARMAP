@@ -26,8 +26,6 @@ def main(**kwargs):
     print(f'Finished aligning and extracting barcodes in {round(align_time / 60, 1)} minutes\n')
 
     # Adjustment if using synthetic data for validation
-    # kwargs['fastq_fn'] =  kwargs['fastq_fn'] if  kwargs['fastq_fn'].endswith('.fastq') else  kwargs['fastq_fn'].replace('.pkl', '.fastq')
-    # kwargs['input_fn'] = kwargs['fastq_fn']
     kwargs['fasta_fn'] = filtered_fn
 
     # Cluster aligned barcodes using vsearch
@@ -81,9 +79,9 @@ def cli():
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up during alignment')
-    parser.add_argument('--indel_penalty', type=float, default=1.0,
+    parser.add_argument('--indel_penalty', type=float, default=3.0,
                         help='Additional penalty for each indel')
-    parser.add_argument('--match_multiplier', type=float, default=4,
+    parser.add_argument('--match_multiplier', type=float, default=2,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
     parser.add_argument('--minimum_match_fraction', type=float, default=0.8,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')

@@ -15,8 +15,7 @@ IUPAC_CODES = {
     'H': ['A','C','T'], 'V': ['A','C','G'], 'N': ['A','C','G','T']
 }
 IUPAC_KEYS = list(IUPAC_CODES.keys())
-ALLOWED_KEYS = [i for i in IUPAC_KEYS if i not in ['N']]
-DEGENERATE_KEYS = [k for k in ALLOWED_KEYS if len(IUPAC_CODES[k]) > 1]
+DEGENERATE_KEYS = [k for k in IUPAC_KEYS if len(IUPAC_CODES[k]) > 1]
 NUCLEOTIDES = ['A', 'C', 'G', 'T']
 
 # Function to check potential homopolymers in a degenerate template
@@ -37,7 +36,7 @@ def sequence_entropy(template: str) -> float:
     return sum(math.log2(len(IUPAC_CODES[b])) for b in template)
 
 
-def expanded_motif_penalty(template: str, ks) -> float:
+def expanded_motif_penalty(template, ks):
     penalty = 0.0
     for k in ks:
         windows = []
@@ -67,16 +66,13 @@ def pareto_front(candidates: list) -> list:
     return front
 
 # Build template biased to high entropy but avoid single-nucleotide codes
-def build_initial_template(length: int, max_homopolymer_len: int) -> str:
+def build_initial_template(length, max_homopolymer_len):
     template = ''
     for _ in range(length):
         # try degenerate codes first
         choices = [c for c in DEGENERATE_KEYS
                    if not could_form_homopolymer(template + c, max_homopolymer_len)]
-        if not choices:
-            # allow single codes if no degenerate valid
-            choices = [c for c in IUPAC_KEYS
-                       if not could_form_homopolymer(template + c, max_homopolymer_len)]
+
         if not choices:
             template = template[:-1]
             continue
@@ -85,8 +81,8 @@ def build_initial_template(length: int, max_homopolymer_len: int) -> str:
     return template
 
 # Mutate biased to increase entropy but prefer degenerate
-def mutate(template: str, max_homopolymer_len: int) -> str:
-    for _ in range(100):
+def mutate(template, max_homopolymer_len, iterations):
+    for _ in range(iterations):
         pos = random.randrange(len(template))
         # prefer degenerate replacements
         alt_deg = [c for c in DEGENERATE_KEYS if c != template[pos]]
@@ -94,7 +90,7 @@ def mutate(template: str, max_homopolymer_len: int) -> str:
                  if not could_form_homopolymer(template[:pos] + c + template[pos+1:], max_homopolymer_len)]
         if not valid:
             # fallback to any code
-            alt_all = [c for c in IUPAC_KEYS if c != template[pos]]
+            alt_all = [c for c in DEGENERATE_KEYS if c != template[pos]]
             valid = [c for c in alt_all
                      if not could_form_homopolymer(template[:pos] + c + template[pos+1:], max_homopolymer_len)]
         if not valid:
@@ -139,7 +135,7 @@ def optimize_barcode_template(length, ks, num_designs=100, iterations=10000,
         temp = initial_temp
 
         for _ in range(iterations):
-            proposal = mutate(current, max_homopolymer_len)
+            proposal = mutate(current, max_homopolymer_len, iterations)
             prop_score = score_template(proposal, ks)
             delta = (prop_score[0]/(1+prop_score[1]) - current_score[0]/(1+current_score[1]))
 
@@ -153,7 +149,6 @@ def optimize_barcode_template(length, ks, num_designs=100, iterations=10000,
     return pareto_front(best_candidates)
 
 
-
 if __name__ == '__main__':
     # Simple simulated annealing script to optimize barcode templates to balance tradeoff between diversity and entropy
     # Select barcode at elbow of this pareto front
@@ -164,11 +159,11 @@ if __name__ == '__main__':
                         help='Length of barcode when generating')
     parser.add_argument('--max_homopolymer_len', type=int, default=3,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--iterations', type=int, default=1000,
+    parser.add_argument('--iterations', type=int, default=100,
                         help='Simulated annealing iterations for each barcode template')
     parser.add_argument('--ks', type=float, default=[3,4,5], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--num_designs', type=float, default=500,
+    parser.add_argument('--num_designs', type=float, default=100,
                         help='How many times to try optimizing different barcode templates')
 
     args = parser.parse_args()
