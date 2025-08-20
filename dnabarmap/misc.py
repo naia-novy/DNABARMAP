@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 true = pd.read_csv('/Users/natenovy/Research/DNABARMAP/syndata/syndataD_mapping_synthetic.tsv', sep='\t')
 gen = pd.read_csv('/Users/natenovy/Research/DNABARMAP/DNABARMAP_outputs/syndataD_mapping.tsv', sep='\t')
 

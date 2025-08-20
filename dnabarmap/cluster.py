@@ -8,15 +8,16 @@ np = import_cupy_numpy()
 def run_vsearch(
     output_fn,
     cluster_dir,
-    threads=16,
-    cluster_iterations=5,
+    threads,
+    cluster_iterations,
+    lower_cluster_id,
     **kwargs):
     makedirs(cluster_dir, exist_ok=True)
     # Use vsearch clustering iterativly to cluster sequences by similarity
     # Do not allow indels since this was already approximated in the alignment step
 
     input_fasta = output_fn
-    values = list(np.linspace(0.95, 0.5, cluster_iterations))
+    values = list(np.linspace(0.95, lower_cluster_id, cluster_iterations))
     for i in range(cluster_iterations):
         i_adj = i * 2
         print(f"Running clustering iteration {i+1}")

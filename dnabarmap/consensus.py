@@ -10,7 +10,7 @@ def determine_consensus(threads, **kwargs):
     # Draft consesnus stage with vsearch
     clusters = glob("tmp/clusters/cluster_*.fastq")
     for fn in clusters:
-        print(fn)
+        # print(fn)
         cluster_id = fn.split('_')[-1].split('.')[0]
         draft_path = f"tmp/consensus/draft/cluster_{cluster_id}_consensus.fastq"
         draft_paf = f"tmp/consensus/draft/cluster_{cluster_id}_consensus.paf"
@@ -31,6 +31,7 @@ def determine_consensus(threads, **kwargs):
         with open(draft_paf, "w") as out_paf:
             cmd = ['minimap2',
                    '-x', 'map-ont',
+                   '-t', str(threads),
                    draft_path,
                    fn]
             subprocess.run(cmd, stdout=out_paf, stderr=subprocess.DEVNULL, check=True)

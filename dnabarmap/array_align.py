@@ -262,20 +262,20 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # Set debugging/optimization parameters
-    parser.add_argument('--seq_limit_for_debugging', type=int, default=1000,
+    parser.add_argument('--seq_limit_for_debugging', type=int, default=None,
                         help='Filter dataset to subset for debugging')
     parser.add_argument('--synthetic_data_available', default=True, action='store_true',
                         help='Compare alignments to synthetic data or true values')
 
     # Set alignment parameters
-    parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--patience', type=int, default=5,
+    parser.add_argument('--batch_size', type=int, default=1024)
+    parser.add_argument('--patience', type=int, default=3,
                         help='How many times to try next best suggestion before giving up')
     parser.add_argument('--match_multiplier', type=float, default=10,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
     parser.add_argument('--max_len', type=int, default=150,
                         help='Remove sequences over this length for efficiency')
-    parser.add_argument('--buffer', type=int, default=30,
+    parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode')
     parser.add_argument('--barcode_template', type=str,
                         default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR', # TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCGATC

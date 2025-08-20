@@ -63,7 +63,7 @@ def cli():
     parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataC',
+    parser.add_argument("--base_fn", default='syndata/syndataD',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
@@ -81,21 +81,24 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=5,
+    parser.add_argument('--patience', type=int, default=3,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--match_multiplier', type=float, default=10,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.80,
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
     parser.add_argument('--max_len', type=int, default=150,
                         help='Shave off ends of sequences over this length for efficiency, '
                              'reccomended to be at least twice length of barcode')
-    parser.add_argument('--buffer', type=int, default=30,
+    parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
-    parser.add_argument("--cluster_iterations", type=int, default=10, help="Repeat greedy clustering this "
+    parser.add_argument("--cluster_iterations", type=int, default=15, help="Repeat greedy clustering this "
                                                                           "many times with decreasing stringency each iteration")
+    parser.add_argument("--lower_cluster_id", type=float, default=0.7, help="Value between 0 and 1 for "
+                                                                           "minimum identify between barcodes for clustering."
+                                                                           "Reccomended >0.8, but can be reduced for small libraries")
     parser.add_argument("--min_sequences", type=int, default=25,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=16,
@@ -139,7 +142,8 @@ def cli():
         rmtree(args.cluster_dir)
     if path.exists(args.consensus_dir):
         rmtree(args.consensus_dir)
-    # rmtree('tmp/')
+    if path.exists('tmp/'):
+        rmtree('tmp/')
 
     if args.synthetic_data_available:
         assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'

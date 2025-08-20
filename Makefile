@@ -1,8 +1,13 @@
-.PHONY: all deps install
+.PHONY: env clean
 
-all: deps install
-
-# Run your python package installation
-install:
-	@echo "Installing Python package..."
+# Create and setup the conda environment
+env:
+	@echo "Creating dnabarmap environment..."
+	conda create -n dnabarmap python=3.10 -y
+	conda install -n dnabarmap -y -c bioconda pbsim3 vsearch abpoa racon
 	conda run -n dnabarmap pip install -e .
+	conda run -n dnabarmap pip install cuda-cuda12x || true
+
+# Remove the environment
+clean:
+	conda env remove -n dnabarmap -y

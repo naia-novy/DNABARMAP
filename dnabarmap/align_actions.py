@@ -1,5 +1,7 @@
 from scipy.ndimage import gaussian_filter1d
 from collections import defaultdict
+from numpy.lib.stride_tricks import sliding_window_view
+
 from dnabarmap.utils import *
 np = import_cupy_numpy()
 
@@ -69,6 +71,7 @@ def score_sequences_simple(sequence_array, reference_array):
 
     return score
 
+
 def compute_adjacency_score(seqs, refs, max_run, match_multiplier):
     probs = refs.sum(axis=-1)[..., np.newaxis]
     wins = np.logical_and(seqs == refs,  seqs != 0)
@@ -99,7 +102,6 @@ def compute_adjacency_score(seqs, refs, max_run, match_multiplier):
         final_scores += result_fw + result_rv
 
     return final_scores
-
 
 def cached_intervals(seq_len, min_len, a, b):
     # full upper‐triangular once, keep as cache for efficiency
@@ -250,7 +252,7 @@ def find_suggestions(seqs, refs, match_multiplier, patience, valid_bound):
 
 def find_best_rolls_batch(seqs, refs, match_multiplier):
     # Parameters
-    max_shift = min(50, seqs.shape[2] // 2)
+    max_shift = min(40, seqs.shape[2] // 2)
     provided_range = np.arange(-max_shift, max_shift + 1)
     n_rolls = len(provided_range)
     n_strands, n_seqs, seq_len, seq_dim = seqs.shape

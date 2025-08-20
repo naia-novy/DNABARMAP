@@ -35,6 +35,7 @@ dnabarmap-env/
 
 # Other files to ignore
 *.swp
+make.sh
 
 # Large file directories
 syndata/

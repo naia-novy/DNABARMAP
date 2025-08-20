@@ -224,7 +224,6 @@ def read_fastq(filename, seq_limit=None):
     return sequences, headers
 
 
-
 def convert_AA_to_nucleotide(aa_seq_list):
     codon_usage = pd.read_csv('ecoli_codon_usage.csv')
 
