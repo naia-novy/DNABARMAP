@@ -24,10 +24,10 @@ def simulate_nanopore(sequence):
         '/usr/local/bin/pbsim',
         '--strategy', 'templ',
         '--method', 'qshmm',
-        '--qshmm', 'pbsim3-master/data/QSHMM-ONT-HQ.model',  # 'pbsim3-master/data/QSHMM-ONT.model'
+        '--qshmm', 'pbsim3-master/data/QSHMM-ONT.model',  # 'pbsim3-master/data/QSHMM-ONT.model'
         '--template', fasta_filename,
         '--prefix', fasta_filename.replace('.fasta', ''),
-        '--depth', '1'
+        '--depth', '1',
         '--seed', str(random_seed)
     ]
 
@@ -83,7 +83,7 @@ def simulate_many(sequences):
         'pbsim',
         '--strategy', 'templ',
         '--method', 'qshmm',
-        '--qshmm', 'data/QSHMM-ONT.model',
+        '--qshmm', 'data/QSHMM-ONT-HQ.model',
         '--template', fasta_filename,
         '--prefix', prefix,
         '--depth', '1'

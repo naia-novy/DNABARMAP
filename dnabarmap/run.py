@@ -59,31 +59,35 @@ def cli():
     parser = argparse.ArgumentParser()
 
     # Directories and filenaemes
-    parser.add_argument('--fastq_fn', type=str, default='syndata/syndataA.pkl')
+    parser.add_argument('--fastq_fn', type=str, default=None)
     parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataA',
+    parser.add_argument("--base_fn", default='syndata/syndataC',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR',
+                        # default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR',
+                        # default='YBRHBRHSDHSDYVDYVWBVWBMDBMDSHDSHKVHKVYDVYDMBDMBWVBWVKHVKHRBH',
+                        # default='RVYDVYDMBDMBRHBRHKVHKVWBVWBMDBMDSHDSHRBHRBWVBWVKHVKHSDHSDYVD',
+                        default='NVKMRBSMDDYVMWYSBDYSDHMBWMKBWSDRYWBMNKYVDKMBSWMBDMWYRBDMHKSN',
+
                         help='Degenerate reference for conducting approximate alignment of sequences')
-    parser.add_argument("--left_coding_flank", default='CTATCGT',
+    parser.add_argument("--left_coding_flank", default='CTGCTATCGT',
                         help="Left constant sequence of coding region")
-    parser.add_argument("--right_coding_flank", default='ATCTAGC',
+    parser.add_argument("--right_coding_flank", default='ATCTAGCATC',
                         help="Right constant sequence of coding region")
 
     # Alignment parameters
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up during alignment')
-    parser.add_argument('--match_multiplier', type=float, default=5,
+    parser.add_argument('--match_multiplier', type=float, default=10,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.8,
+    parser.add_argument('--minimum_match_fraction', type=float, default=0.80,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
-    parser.add_argument('--max_len', type=int, default=180,
+    parser.add_argument('--max_len', type=int, default=150,
                         help='Shave off ends of sequences over this length for efficiency, '
                              'reccomended to be at least twice length of barcode')
     parser.add_argument('--buffer', type=int, default=30,
@@ -91,18 +95,14 @@ def cli():
 
     # Cluster parameters
     parser.add_argument("--cluster_iterations", type=int, default=10, help="Repeat greedy clustering this "
-                                                                          "many times with increasing stringency each iteration")
-    parser.add_argument("--min_sequences", type=int, default=10,
+                                                                          "many times with decreasing stringency each iteration")
+    parser.add_argument("--min_sequences", type=int, default=30,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
-    parser.add_argument("--medaka_model", type=str, default='default',
-                        help="Which model to use for Medaka consensus refining,"
-                             "if none provided will skip medaka and use consensus from vsearch")
 
     parser.add_argument("--save_intermediate_files", default=True, action='store_true',
                         help="Should not delete intermediate files generated during DNABARMAP")
-
     parser.add_argument("--synthetic_data_available", default=False, action='store_true',
                         help="Run comparisons to true values using synthetic data to validate functionality/accuracy")
 
@@ -118,7 +118,7 @@ def cli():
         assert name is not None, 'Must provide either fasta_fn, fastq_fn, or base_fn'
         args.base_fn = '.'.join(name.split('.')[:-1])
     if args.fastq_fn is None:
-        args.fasta_fn = args.base_fn + '.fasta'
+        args.fastq_fn = args.base_fn + '.fastq'
     if args.fasta_fn is None:
         args.fasta_fn = args.base_fn + '.fasta'
     if args.mapping_fn is None:

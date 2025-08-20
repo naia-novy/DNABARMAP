@@ -271,9 +271,9 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up')
-    parser.add_argument('--match_multiplier', type=float, default=5,
+    parser.add_argument('--match_multiplier', type=float, default=10,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--max_len', type=int, default=180,
+    parser.add_argument('--max_len', type=int, default=150,
                         help='Remove sequences over this length for efficiency')
     parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode')

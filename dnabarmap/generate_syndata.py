@@ -175,17 +175,17 @@ if __name__ == '__main__':
     parser.add_argument('--attempt_n_barcodes', type=int, default=1000,
                         help='Number of attempts to generate barcode template')
     parser.add_argument('--motif', type=str, default=None,
-                        help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate samplign')
+                        help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate sampling')
 
     # Parameters defining what syndata to generate
     parser.add_argument('--duplication_rate', type=float, default=50,
                         help='Analogous to sequencing depth')
     parser.add_argument('--barcodes_per_variant', type=float, default=10)
-    parser.add_argument('--num_variants', type=float, default=1)
+    parser.add_argument('--num_variants', type=float, default=10)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR',
+                        default='NVKMRBSMDDYVMWYSBDYSDHMBWMKBWSDRYWBMNKYVDKMBSWMBDMWYRBDMHKSN',
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
@@ -198,7 +198,7 @@ if __name__ == '__main__':
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
     parser.add_argument('--right_coding_flank', type=str, default='ATCTAGCATC',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/syndataA')
+    parser.add_argument('--fn', type=str, default='syndata/syndataC')
 
     args = parser.parse_args()
 

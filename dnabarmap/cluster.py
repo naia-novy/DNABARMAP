@@ -15,40 +15,51 @@ def run_vsearch(
     # Use vsearch clustering iterativly to cluster sequences by similarity
     # Do not allow indels since this was already approximated in the alignment step
 
-    # Step 1: First clustering round
     input_fasta = output_fn
-    adj_cluster_iterations = cluster_iterations - 1
-    values = list(np.linspace(0.95, 0.8, adj_cluster_iterations)) + [0.9]
+    values = list(np.linspace(0.95, 0.5, cluster_iterations))
     for i in range(cluster_iterations):
-        out = path.join(cluster_dir, f"consensus_r{i+1}.fasta")
-        uc = path.join(cluster_dir, f"clusters_r{i+1}.uc")
-        id = values[i]
+        i_adj = i * 2
+        print(f"Running clustering iteration {i+1}")
 
-        cmd = [
-            "vsearch", "--cluster_size", input_fasta,
+        first_out = path.join(cluster_dir, f"consensus_r{i_adj+1}.fasta")
+        second_out = path.join(cluster_dir, f"consensus_r{i_adj+2}.fasta")
+        first_uc = path.join(cluster_dir, f"clusters_r{i_adj+1}.uc")
+        second_uc = path.join(cluster_dir, f"clusters_r{i_adj+2}.uc")
+        id = values[i]
+        second_id = max(0.9, values[i])
+
+        cmd = ["vsearch", "--cluster_size", input_fasta,
             "--id", str(id),
             "--threads", str(threads),
-            "--consout", out,
-            "--uc", uc,
+            "--consout", first_out,
+            "--uc", first_uc,
             "--sizeout",
             "--sizein",
             "--clusterout_sort",
-            # "--cons_truncate",
+            "--cons_truncate",
             "--gapopen", "1000",
-            "--gapext", "1000",
-        ]
-        print(f"Running clustering iteration {i+1}")
-        subprocess.run(cmd,
-                       check=True,
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
-        input_fasta = out
+            "--gapext", "1000"]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        cmd = ["vsearch", "--cluster_size", first_out,
+            "--id", str(second_id),
+            "--threads", str(threads),
+            "--consout", second_out,
+            "--uc", second_uc,
+            "--sizeout",
+            "--sizein",
+            "--clusterout_sort",
+            "--cons_truncate",
+            "--gapopen", "1000",
+            "--gapext", "1000"]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        input_fasta = second_out
 
     # Final mapping
     final_uc = path.join(cluster_dir, "clustered_barcodes.uc")
     cmd = [
         "vsearch", "--usearch_global", input_fasta,
-        "--db", out,
+        "--db", second_out,
         "--id", str(id),
         "--threads", str(threads),
         "--uc", final_uc,
@@ -56,10 +67,7 @@ def run_vsearch(
         "--gapopen", "1000",
         "--gapext", "1000",
     ]
-    subprocess.run(cmd,
-                   check=True,
-                   stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL)
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for_debugging=None, **kwargs):
     # Using cluster information, save all full seqs for a given cluster to a file
@@ -94,8 +102,6 @@ def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for
 
         expansions[i] = expand
 
-    print(f"Found {len(approved_clusters)} clusters with >= {min_sequences} sequences.")
-
     # Group full sequences for clustering
     clustered_sequences = defaultdict(list)
     with open(filtered_fn) as handle:
@@ -109,10 +115,15 @@ def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for
 
             clustered_sequences[cluster_id].append(record)
 
+    written_clusters = 0
     for cluster, seqs in clustered_sequences.items():
         with open(f"tmp/clusters/cluster_{cluster}.fastq", "w") as f:
             for seq in seqs:
                 SeqIO.write(seq, f, "fastq")
+            written_clusters += 1
+
+    print(f"Wrote full sequence fastqs for {written_clusters} clusters with >= {min_sequences} sequences.")
+
 
 def resolve_final_cluster(seq_id, expansion_maps):
     # Iterate over expansions from low to high. When reading from full fasta, use index to map through expansions and
