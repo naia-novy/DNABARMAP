@@ -4,7 +4,7 @@ from os import makedirs
 from utils import import_cupy_numpy
 np = import_cupy_numpy()
 
-def determine_consensus(**kwargs):
+def determine_consensus(threads, **kwargs):
     makedirs('tmp/consensus/draft/', exist_ok=True)
 
     # Draft consesnus stage with vsearch
@@ -20,30 +20,13 @@ def determine_consensus(**kwargs):
             cmd = ['abpoa',
                    '-a 0',
                    '-m 1',
-                   '-X 4',
-                   '-M 4'
-                   '-O 3,3',
-                   '-E 2,1',
+                   '-O 4,4',
                    '-Q',
                    '-i',
                    '-s',
                    '-r 5',
                    fn]
             subprocess.run(cmd, stdout=out_fn, stderr=subprocess.DEVNULL, check=True)
-
-        # with open(draft_path, "w") as out_fn:
-        #     cmd = ['abpoa',
-        #            '-a 0',
-        #            '-m 1',
-        #            '-X 10',
-        #            '-O 4,4',
-        #            '-E 4,4',
-        #            '-Q',
-        #            '-i',
-        #            '-s',
-        #            '-r 5',
-        #            fn]
-        #     subprocess.run(cmd, stdout=out_fn, stderr=subprocess.DEVNULL, check=True)
 
         with open(draft_paf, "w") as out_paf:
             cmd = ['minimap2',
@@ -56,7 +39,11 @@ def determine_consensus(**kwargs):
             cmd = ['racon',
                    fn,
                    draft_paf,
-                   draft_path]
+                   draft_path,
+                   '--no-trimming',
+                   '-q 8',
+                   '-w 10000', # perform poa on whole sequences since they are already clustered
+                   '-t', str(threads)]
             subprocess.run(cmd, stdout=out_cons, stderr=subprocess.DEVNULL, check=True)
 
     print(f"Consensus generation complete.")

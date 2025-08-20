@@ -96,7 +96,7 @@ def cli():
     # Cluster parameters
     parser.add_argument("--cluster_iterations", type=int, default=10, help="Repeat greedy clustering this "
                                                                           "many times with decreasing stringency each iteration")
-    parser.add_argument("--min_sequences", type=int, default=30,
+    parser.add_argument("--min_sequences", type=int, default=25,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
@@ -139,8 +139,12 @@ def cli():
         rmtree(args.cluster_dir)
     if path.exists(args.consensus_dir):
         rmtree(args.consensus_dir)
+    # rmtree('tmp/')
+
     if args.synthetic_data_available:
         assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
+    if args.min_sequences < 25:
+        print('WARNING: min_sequences is less than 25, this is not reccomended and may cause innacurate consensus sequence determination')
 
     makedirs(args.cluster_dir, exist_ok=True)
     makedirs(args.consensus_dir, exist_ok=True)
