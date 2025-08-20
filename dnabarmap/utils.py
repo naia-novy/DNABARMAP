@@ -1,6 +1,8 @@
 import pandas as pd
 import os
 from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
+
 
 def import_cupy_numpy(print_note=False):
     gpu_available = False
@@ -160,7 +162,7 @@ def reverse_complement(seq):
     return ''.join(degenerate_complement[base] for base in reversed(seq))
 
 
-def write_full_fastq(sequences, barcode_fn, full_fn, filtered_fn):
+def write_full_fastq(sequences, directions, barcode_fn, full_fn, filtered_fn):
     # if synthetic data read from fastq for filtering
     if full_fn.endswith('.pkl'):
         full_fn = full_fn.replace('.pkl', '.fastq')
@@ -173,10 +175,17 @@ def write_full_fastq(sequences, barcode_fn, full_fn, filtered_fn):
         for idx, seq in idx_to_barcode.items():
             bf.write(f">{idx}\n{seq}\n")
 
-    # stream through the full fastq and select matching indices
     matched_records = []
     for i, rec in enumerate(SeqIO.parse(full_fn, "fastq")):
-        if i in idx_to_barcode.keys():
+        if i in idx_to_barcode:
+            if directions[i] == 1:  # reverse complement required
+                new_seq = rec.seq.reverse_complement() # reverse complement sequence
+                new_quals = rec.letter_annotations["phred_quality"][::-1] # reverse quality scores
+                rec = SeqRecord(
+                    new_seq,
+                    id=rec.id,
+                    description=rec.description,
+                    letter_annotations={"phred_quality": new_quals})
             matched_records.append(rec)
 
     # write filtered full reads with qualities preserved

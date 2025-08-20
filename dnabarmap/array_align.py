@@ -82,19 +82,19 @@ def initialize_sequences(sequences, barcode_template, match_multiplier, data,
         score_array[:, batch_idx:batch_end] = scores
         best_rolls_array[:, batch_idx:batch_end] = rolls
 
-    best_indices = np.argmax(score_array, axis=0)  # 0 = fw, 1 = rv
+    directions = np.argmax(score_array, axis=0)  # 0 = fw, 1 = rv
     batch_idxs = np.arange(score_array.shape[1])
-    best_rolls = best_rolls_array[best_indices, batch_idxs]  # pick roll for winning strand
+    best_rolls = best_rolls_array[directions, batch_idxs]  # pick roll for winning strand
 
     # Gather sequences corresponding to best strand
-    best_sequences = sequence_array[best_indices, batch_idxs]
+    best_sequences = sequence_array[directions, batch_idxs]
     best_sequences = roll_batch(best_sequences, best_rolls.astype(int)) # reroll best sequences
 
     if synthetic_data_available:
-        print(f'If using synthetic data, number of incorrectly oriented sequences: {best_indices.sum()}')
+        print(f'If using synthetic data, number of incorrectly oriented sequences: {directions.sum()}')
         report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, range(best_sequences.shape[0]))
 
-    return best_sequences
+    return best_sequences, directions
 
 def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False):
     # Print alignment to true barcode and barcode reference
@@ -150,7 +150,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     sequences, headers, data, seq_limit_for_debugging = load_data(input_fn, seq_limit_for_debugging, batch_size)
 
     # Initialize sequence, reference, and patience arrays
-    sequence_array = initialize_sequences(sequences, barcode_template, match_multiplier, data,
+    sequence_array, directions = initialize_sequences(sequences, barcode_template, match_multiplier, data,
                                           synthetic_data_available, seq_limit_for_debugging, max_len, buffer, batch_size)
     reference_array = reference_to_array(barcode_template, sequence_array.shape[1])
     reference_array = np.repeat(reference_array[np.newaxis], len(sequence_array), axis=0)
@@ -256,7 +256,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     print(np.mean(scores))
 
     # Save alignments
-    write_full_fastq(passed_seqs, output_fn, input_fn, filtered_fn)
+    write_full_fastq(passed_seqs, directions, output_fn, input_fn, filtered_fn)
 
 
 if __name__ == '__main__':

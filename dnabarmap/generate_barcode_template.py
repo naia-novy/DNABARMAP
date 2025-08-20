@@ -148,11 +148,11 @@ if __name__ == '__main__':
                         help='Length of barcode when generating')
     parser.add_argument('--max_homopolymer_len', type=int, default=3,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--iterations', type=int, default=100,
+    parser.add_argument('--iterations', type=int, default=1000,
                         help='Simulated annealing iterations for each barcode template')
-    parser.add_argument('--ks', type=float, default=[1,2,3], nargs='+',
+    parser.add_argument('--ks', type=float, default=[1,2], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--num_designs', type=float, default=10,
+    parser.add_argument('--num_designs', type=float, default=500,
                         help='How many times to try optimizing different barcode templates')
 
     args = parser.parse_args()
