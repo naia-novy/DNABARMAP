@@ -2,10 +2,10 @@ import random
 import math
 import argparse
 from collections import Counter
-import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
-from dnabarmap.utils import nuc_dict
+from dnabarmap.utils import nuc_dict, import_cupy_numpy
+np = import_cupy_numpy()
 
 nuc_keys = list(nuc_dict.keys())
 degenerate_keys = [k for k in nuc_keys if len(nuc_dict[k]) > 1]

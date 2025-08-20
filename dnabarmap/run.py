@@ -63,15 +63,12 @@ def cli():
     parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataD',
+    parser.add_argument("--base_fn", default='syndata/syndataE',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        # default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR',
-                        # default='YBRHBRHSDHSDYVDYVWBVWBMDBMDSHDSHKVHKVYDVYDMBDMBWVBWVKHVKHRBH',
-                        # default='RVYDVYDMBDMBRHBRHKVHKVWBVWBMDBMDSHDSHRBHRBWVBWVKHVKHSDHSDYVD',
-                        default='NVKMRBSMDDYVMWYSBDYSDHMBWMKBWSDRYWBMNKYVDKMBSWMBDMWYRBDMHKSN',
+                        default='NMBKSWSNYRHBMDRKHNRKHMNKVHYDMDYRVDYKVWSWRVYYRRVYVKBWVSVWYVKN',
 
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='CTGCTATCGT',
@@ -81,7 +78,7 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=3,
+    parser.add_argument('--patience', type=int, default=5,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--match_multiplier', type=float, default=10,
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')

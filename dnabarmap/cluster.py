@@ -76,9 +76,12 @@ def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for
         seq_limit_for_debugging = np.inf
     expansions = {}
     approved_clusters = set()
+
+    cluster_iterations *= 2
     for i in range(1, cluster_iterations+1):
         observed = set()
         expand = defaultdict()
+        print(i)
         with open(f"tmp/clusters/clusters_r{i}.uc") as uc:
             for L in uc:
                 if L[0] not in ("S", "H"):

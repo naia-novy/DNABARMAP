@@ -5,17 +5,6 @@ DNABARMAP is a pipeline to determine barcode--variant mappings of degenerate bar
 
 * * * * *
 
-Prerequisites
--------------
-
--   [Conda (Miniconda or Anaconda)](https://docs.conda.io/en/latest/miniconda.html) installed
-
--   `git` (optional --- you can also download the ZIP from GitHub)
-
--   Recommended: `make` / Bash shell for `make.sh`
-
-* * * * *
-
 Installation
 ------------
 
@@ -27,7 +16,7 @@ CopyEdit
 
 `git clone https://github.com/naia-novy/DNABARMAP.git
 cd DNABARMAP
-bash make.sh    # environment setup, initialization, and (optional) downloads
+make   # environment setup, initialization, and (optional) downloads
 conda activate dnabarmap
 dnabarmap --help   # confirm installation`
 
@@ -41,7 +30,7 @@ bash
 
 CopyEdit
 
-`bash make.sh
+`make
 conda activate dnabarmap
 dnabarmap --help`
 

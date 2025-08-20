@@ -31,11 +31,9 @@ def determine_mapping(consensus_dir, barcode_template, left_coding_flank, right_
                     out.write(f"{file}\t{barcode}\t{coding_region}\n")
                 else:
                     no_match_count += 1
-
                 break # only do first record
 
-    print(f"Did not find matches for {round(no_match_count/len(consensus_files)*100, 1)}% of sequences")
-    pass
+    print(f"Did not find a match for {no_match_count}/{len(consensus_files)} sequences")
 
 def build_degenerate_regex(template):
     pattern = ''
