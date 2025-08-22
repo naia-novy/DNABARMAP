@@ -181,11 +181,11 @@ if __name__ == '__main__':
     parser.add_argument('--duplication_rate', type=float, default=50,
                         help='Analogous to sequencing depth')
     parser.add_argument('--barcodes_per_variant', type=float, default=10)
-    parser.add_argument('--num_variants', type=float, default=100)
+    parser.add_argument('--num_variants', type=float, default=10)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='ATGCAGRMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVHGCATC',
+                        default='ATGCAGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNGCATCA',
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'

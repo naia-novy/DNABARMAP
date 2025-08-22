@@ -67,8 +67,8 @@ def cli():
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        # default='ATGCAGRMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVHGCATC',
-                        default='RMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVH',
+                        default='ATGCAGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNGCATCA',
+                        # default='RMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVH',
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
@@ -77,7 +77,7 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=3,
+    parser.add_argument('--patience', type=int, default=0,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
