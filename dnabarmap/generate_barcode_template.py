@@ -4,7 +4,6 @@ import argparse
 from collections import Counter
 from numpy.lib.stride_tricks import sliding_window_view
 
-from dnabarmap.align_actions import best_single_interval
 from dnabarmap.utils import nuc_dict, import_cupy_numpy
 np = import_cupy_numpy()
 
@@ -13,7 +12,7 @@ degenerate_keys = [k for k in nuc_keys if len(nuc_dict[k]) > 1]
 nucleotides = ['A', 'C', 'G', 'T']
 
 # Function to check potential homopolymers in a degenerate template
-def could_form_homopolymer(template: str, max_homopolymer_len: int) -> bool:
+def could_form_homopolymer(template, max_homopolymer_len):
     for nuc in nucleotides:
         run = 0
         for c in template:
@@ -25,11 +24,8 @@ def could_form_homopolymer(template: str, max_homopolymer_len: int) -> bool:
                 run = 0
     return False
 
-def adjust_p(p, revert=True):
-    if not revert:
-        adj_p = 1/(p**2)
-    else:
-        adj_p = (1/p)**.5
+def adjust_p(p):
+    adj_p = (1/p)
 
     return adj_p
 
@@ -44,7 +40,7 @@ def calculate_mean_p(template, adjust=True):
     p /= len(template)
 
     if adjust:
-        return adjust_p(p, False)
+        return adjust_p(p)
     else:
         return p
 
@@ -75,7 +71,14 @@ def expanded_motif_penalty(template, ks):
         pens.append(tot)
     return float(np.log1p(np.mean(pens)))
 
-def build_initial_template(length, max_homopolymer_len):
+def check_conditions(template, max_homopolymer_len, no_gquad):
+    result = could_form_homopolymer(template, max_homopolymer_len)
+    if no_gquad:
+        result = result or 'GGG' in template
+
+    return result
+
+def build_initial_template(length, max_homopolymer_len, no_gquad):
     # Build template biased to high entropy but avoid single-nucleotide codes
     generating = True
     counter = 0
@@ -84,12 +87,12 @@ def build_initial_template(length, max_homopolymer_len):
         for _ in range(length):
             # try degenerate codes first
             choices = [c for c in degenerate_keys
-                       if not could_form_homopolymer(template + c, max_homopolymer_len)]
+                       if not check_conditions(template + c, max_homopolymer_len, no_gquad)]
 
             if not choices:
                 # allow single codes if no degenerate valid
                 choices = [c for c in nuc_keys
-                           if not could_form_homopolymer(template + c, max_homopolymer_len)]
+                           if not check_conditions(template + c, max_homopolymer_len, no_gquad)]
             if not choices:
                 break
             weights = [len(nuc_dict[c]) for c in choices]
@@ -102,13 +105,13 @@ def build_initial_template(length, max_homopolymer_len):
             raise Exception('Could not generate templates, try increasing max_homopolymer_len')
     return template
 
-def mutate(template, max_homopolymer_len, iterations):
+def mutate(template, max_homopolymer_len, iterations, no_gquad):
     # Mutate biased to increase entropy but prefer degenerate
     for _ in range(iterations):
         pos = random.randrange(len(template))
         alt_deg = [c for c in degenerate_keys if c != template[pos]]
         valid = [c for c in alt_deg
-                 if not could_form_homopolymer(template[:pos] + c + template[pos+1:], max_homopolymer_len)]
+                 if not check_conditions(template[:pos] + c + template[pos+1:], max_homopolymer_len, no_gquad)]
 
         if not valid:
             continue
@@ -118,19 +121,21 @@ def mutate(template, max_homopolymer_len, iterations):
     return template
 
 def optimize_barcode_template(barcode_len, ks, num_designs=100, iterations=10000,
-                              max_homopolymer_len=3, initial_temp=1.0, cooling_rate=0.0001, **kwargs):
+                              max_homopolymer_len=3, no_gquad=False, initial_temp=1.0, cooling_rate=0.0001, **kwargs):
     print(f'Generating {num_designs} optimized barcodes ')
     best_candidates = []
     for num in range(num_designs):
-        current = build_initial_template(barcode_len, max_homopolymer_len)
+        current = build_initial_template(barcode_len, max_homopolymer_len, no_gquad)
         current_score = score_template(current, ks)
         candidates = [(current, current_score)]
         temp = initial_temp
 
         for _ in range(iterations):
-            proposal = mutate(current, max_homopolymer_len, iterations)
+            proposal = mutate(current, max_homopolymer_len, iterations, no_gquad)
             prop_score = score_template(proposal, ks)
-            delta = (prop_score[0]/(1+prop_score[1]) - current_score[0]/(1+current_score[1]))
+            delta = prop_score[0]- current_score[0]
+            # delta = prop_score[0]*prop_score[1] - current_score[0]*current_score[1]
+            # delta = (prop_score[0]/(1+prop_score[1]) - current_score[0]/(1+current_score[1]))
             if delta >= 0 or random.random() < math.exp(delta / temp):
                 current, current_score = proposal, prop_score
                 candidates.append((current, current_score))
@@ -149,22 +154,25 @@ if __name__ == '__main__':
                         help='Length of barcode when generating')
     parser.add_argument('--max_homopolymer_len', type=int, default=4,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--iterations', type=int, default=5000,
+    parser.add_argument('--iterations', type=int, default=25,
                         help='Simulated annealing iterations for each barcode template')
-    parser.add_argument('--ks', type=float, default=[], nargs='+',
+    parser.add_argument('--ks', type=float, default=[1,2,3], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--num_designs', type=float, default=200,
+    parser.add_argument('--num_designs', type=float, default=1000,
                         help='How many times to try optimizing different barcode templates')
+    parser.add_argument('--no_gquad', default=True, action='store_true',
+                        help='Eliminate the possiblility of G quadraplexes by not allowing 3 consecutive gs'
+                             'This is mostly important for RNA barcodes')
 
     args = parser.parse_args()
 
-    best_candidates = optimize_barcode_template(args.barcode_len, args.ks, args.num_designs, args.iterations, args.max_homopolymer_len)
+    best_candidates = optimize_barcode_template(args.barcode_len, args.ks, args.num_designs, args.iterations, args.max_homopolymer_len, args.no_gquad)
     best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
     best_candidates = sorted(best_candidates, key=lambda x: x[1])
     filtered_candidates = [i for i in best_candidates if all([n not in i[0] for n in nucleotides])]
 
     print('Full results: \n', best_candidates)
-    print(f'\nBest candidate: {best_candidates[0], adjust_p(best_candidates[1][0])}')
+    print(f'Best candidate: {best_candidates[0][1], best_candidates[0][1]}\n')
 
     print('Full results filtered: \n', filtered_candidates)
-    print(f'\nBest filtered candidate: {filtered_candidates[0], adjust_p(filtered_candidates[1][0])}')
+    print(f'Best filtered candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
