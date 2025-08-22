@@ -49,8 +49,8 @@ def determine_consensus(threads, **kwargs):
                    draft_paf,
                    draft_path,
                    '--no-trimming',
-                   '-q 8',
-                   '-w 1000', # perform poa on majority/all sequence length since they are already clustered
+                   '-q 5',
+                   '-w 2500', # perform poa on majority/all sequence length since they are already clustered
                    '-t', str(threads)]
             subprocess.run(cmd, stdout=out_cons, stderr=subprocess.DEVNULL, check=True)
 

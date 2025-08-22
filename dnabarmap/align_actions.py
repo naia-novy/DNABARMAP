@@ -15,11 +15,9 @@ def sequences_to_array(sequences, max_len):
         seq_array[i, shift:len(indices)+shift, :] = indices
     return seq_array
 
-def reference_to_array(reference, max_len=None):
+def reference_to_array(reference, max_len):
     # Convert string based reference DNA sequences to N x 4 array (int encoding)
-    if max_len is None:
-        max_len = int(len(reference)*1.25)
-
+    assert max_len is not None
     shift = int((max_len - len(reference))/2)
     ref = np.full((4, max_len), np.nan, dtype=np.float32)
     indices = [hot_degenerate_base_mapping[base] for base in reference]
@@ -28,7 +26,7 @@ def reference_to_array(reference, max_len=None):
     return ref[:, np.newaxis, :]
 
 
-def score_sequences(sequence_array, reference_array, match_multiplier):
+def score_sequences(sequence_array, reference_array):
     # Score sequences by rewarding alignments that have long stretches of adjacent matches
     ref_mask = (reference_array != 6) & (reference_array != 0)
     seq_mask = sequence_array != 0
@@ -36,7 +34,7 @@ def score_sequences(sequence_array, reference_array, match_multiplier):
     seq_array = sequence_array * seq_mask
 
     valid_indices = np.logical_and(~np.isnan(ref_array).any(axis=-1), ~np.isnan(seq_array).any(axis=-1))
-    score = compute_adjacency_score(sequence_array, reference_array, max_run=5, match_multiplier=match_multiplier)
+    score = compute_adjacency_score(sequence_array, reference_array, max_run=5)
     score = np.where(valid_indices, score, np.nan)
 
     return score
@@ -72,7 +70,7 @@ def score_sequences_simple(sequence_array, reference_array):
     return score
 
 
-def compute_adjacency_score(seqs, refs, max_run, match_multiplier):
+def compute_adjacency_score(seqs, refs, max_run):
     probs = refs.sum(axis=-1)[..., np.newaxis]
     wins = np.logical_and(seqs == refs,  seqs != 0)
     scores = wins / probs
@@ -81,7 +79,7 @@ def compute_adjacency_score(seqs, refs, max_run, match_multiplier):
     indel_mask = np.logical_or(seqs == 6, refs == 6)
     scores[indel_mask] = 0.01 # Add small smoothing factor for multiplication chains
     scores[zero_mask] = 0.0
-    scores = scores.sum(axis=-1) * match_multiplier
+    scores = scores.sum(axis=-1)
 
     if len(scores.shape) == 4:
         d, r, E, B = scores.shape
@@ -197,7 +195,7 @@ def expand_bounds(mask, n):
     return expanded
 
 
-def find_suggestions(seqs, refs, match_multiplier, patience, valid_bound):
+def find_suggestions(seqs, refs, patience, valid_bound):
     # Wrapper to compare sequences and references and make suggestions for where indels should be made
     max_shifts = [1,2,3]
     ps = [(1/i)**2 for i in max_shifts]
@@ -216,7 +214,7 @@ def find_suggestions(seqs, refs, match_multiplier, patience, valid_bound):
     for idx, shift in enumerate(relevant_range):
         rolled = np.roll(seqs, shift=shift, axis=1)
         sc = score_sequences_simple(rolled, refs)
-        sc = np.nan_to_num(sc*match_multiplier, nan=0)
+        sc = np.nan_to_num(sc, nan=0)
         result[idx] = np.roll(sc, -shift, axis=-1)
 
     result_mask = np.isnan(result)
@@ -250,9 +248,9 @@ def find_suggestions(seqs, refs, match_multiplier, patience, valid_bound):
     return best
 
 
-def find_best_rolls_batch(seqs, refs, match_multiplier):
+def find_best_rolls_batch(seqs, refs):
     # Parameters
-    max_shift = min(40, seqs.shape[2] // 2)
+    max_shift = min(50, seqs.shape[2] // 2)
     provided_range = np.arange(-max_shift, max_shift + 1)
     n_rolls = len(provided_range)
     n_strands, n_seqs, seq_len, seq_dim = seqs.shape
@@ -262,24 +260,18 @@ def find_best_rolls_batch(seqs, refs, match_multiplier):
     for idx, shift in enumerate(provided_range):
         rolled_all[:,idx] = np.roll(seqs, shift=shift, axis=2)
 
-    adjacency_matrix = compute_adjacency_score(rolled_all, refs[:, np.newaxis], max_run=5, match_multiplier=match_multiplier)
+    adjacency_matrix = compute_adjacency_score(rolled_all, refs[:, np.newaxis], max_run=10)**2
     adjacency_score = adjacency_matrix.sum(axis=(-1))
 
-    # Smooth across roll axis
-    matches = ((rolled_all == refs[:, np.newaxis]) & (rolled_all == 1)).sum(axis=(-1, -2))
-    smoothed = gaussian_filter1d(adjacency_score*matches, sigma=3, axis=1)
-
     # Pick best roll per sequence
-    n_strands, n_rolls, n_seqs = smoothed.shape
-    best_rolls_idx = np.argmax(smoothed, axis=1)  # shape: (2, n_seqs)
-
-    # Now grab the corresponding best scores and rolls
-    strand_idx = np.arange(n_strands)[:, None]  # shape: (2, 1)
-    batch_idx = np.arange(n_seqs)[None, :]  # shape: (1, n_seqs)
-    best_scores = smoothed[strand_idx, best_rolls_idx, batch_idx]  # shape: (2, n_seqs)
+    direction = np.argmax(np.mean(adjacency_score, axis=1), 0)
+    # smoothed = gaussian_filter1d(adjacency_score[direction, :, np.arange(direction.shape[0])], sigma=5)
+    compressed = adjacency_score[direction, :, np.arange(direction.shape[0])]
+    best_rolls_idx = np.argmax(compressed, axis=-1)
     best_rolls = provided_range[best_rolls_idx]  # shape: (2, n_seqs)
 
-    return best_rolls, best_scores
+    return best_rolls, direction
+
 
 def roll_batch(batch_array, roll_values):
     # Apply batched roll to array

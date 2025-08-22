@@ -18,7 +18,7 @@ def run_vsearch(
     # Do not allow indels since this was already approximated in the alignment step
 
     input_fasta = output_fn
-    values = list(np.linspace(0.95, lower_cluster_id, cluster_iterations))
+    values = list(np.linspace(0.98, lower_cluster_id, cluster_iterations))
     for i in range(cluster_iterations):
         i_adj = i * 2
         print(f"Running clustering iteration {i+1}")
@@ -194,6 +194,10 @@ def resolve_final_cluster(seq_id, expansion_maps):
     # determine cluster, then store in this cluster
     current = seq_id
     for i in range(1, len(expansion_maps) + 1):
-        current = expansion_maps[i][str(current)]
+        if str(current) in expansion_maps[i]:
+            current = expansion_maps[i][str(current)]
+        else:
+            break  # current is the root cluster
+
     return current
 

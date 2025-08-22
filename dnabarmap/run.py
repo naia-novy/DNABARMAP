@@ -3,7 +3,6 @@ import argparse
 from os import makedirs, path
 from shutil import rmtree
 
-
 from dnabarmap.array_align import align
 from dnabarmap.cluster import run_vsearch, save_full_seqs
 from dnabarmap.consensus import determine_consensus
@@ -61,7 +60,6 @@ def cli():
 
     # Directories and filenaemes
     parser.add_argument('--fastq_fn', type=str, default=None)
-    parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
     parser.add_argument("--base_fn", default='syndata/syndataF',
@@ -69,10 +67,9 @@ def cli():
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='ATGCAGRMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVHGCATC',
-                        # default='RMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVH',
+                        # default='ATGCAGRMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVHGCATC',
+                        default='RMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVH',
                         help='Degenerate reference for conducting approximate alignment of sequences')
-
     parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
     parser.add_argument("--right_coding_flank", default='ATCTAGC',
@@ -80,27 +77,20 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=5,
+    parser.add_argument('--patience', type=int, default=3,
                         help='How many times to try next best suggestion before giving up during alignment')
-    parser.add_argument('--match_multiplier', type=float, default=10,
-                        help='Multiply per base scores by this value to favor alignment to degenerates with less options')
-    parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
-                        help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
-    parser.add_argument('--max_len', type=int, default=180,
-                        help='Shave off ends of sequences over this length for efficiency, '
-                             'reccomended to be at least twice length of barcode')
     parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
-    parser.add_argument("--cluster_iterations", type=int, default=15, help="Repeat greedy clustering this "
+    parser.add_argument("--cluster_iterations", type=int, default=25, help="Repeat greedy clustering this "
                                                                           "many times with decreasing stringency each iteration")
-    parser.add_argument("--lower_cluster_id", type=float, default=0.75, help="Value between 0 and 1 for "
+    parser.add_argument("--lower_cluster_id", type=float, default=0.8, help="Value between 0 and 1 for "
                                                                            "minimum identify between barcodes for clustering."
                                                                            "Reccomended >0.8, but can be reduced for small libraries")
     parser.add_argument("--min_sequences", type=int, default=25,
                         help="Minimum num_sequences for cluster to be valid >=")
-    parser.add_argument("--threads", type=int, default=8,
+    parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
 
     parser.add_argument("--save_intermediate_files", default=True, action='store_true',
@@ -116,13 +106,11 @@ def cli():
     args.consensus_dir = args.output_dir + '/consensus/'
 
     if args.base_fn is None:
-        name = args.fastq_fn if args.fastq_fn is None else args.fasta_fn is None
+        name = args.fastq_fn
         assert name is not None, 'Must provide either fasta_fn, fastq_fn, or base_fn'
         args.base_fn = '.'.join(name.split('.')[:-1])
     if args.fastq_fn is None:
         args.fastq_fn = args.base_fn + '.fastq'
-    if args.fasta_fn is None:
-        args.fasta_fn = args.base_fn + '.fasta'
     if args.mapping_fn is None:
         args.mapping_fn = args.base_fn + '_mapping.tsv'
     args.barcodes_fn = args.base_fn + '_barcodes.fasta'  # used in array_align
