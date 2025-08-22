@@ -5,6 +5,7 @@ from collections import defaultdict
 from dnabarmap.utils import import_cupy_numpy
 np = import_cupy_numpy()
 
+
 def run_vsearch(
     output_fn,
     cluster_dir,
@@ -37,9 +38,7 @@ def run_vsearch(
             "--sizeout",
             "--sizein",
             "--clusterout_sort",
-            "--cons_truncate",
-            "--gapopen", "1000",
-            "--gapext", "1000"]
+            "--cons_truncate"]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         cmd = ["vsearch", "--cluster_size", first_out,
@@ -50,9 +49,7 @@ def run_vsearch(
             "--sizeout",
             "--sizein",
             "--clusterout_sort",
-            "--cons_truncate",
-            "--gapopen", "1000",
-            "--gapext", "1000"]
+            "--cons_truncate"]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         input_fasta = second_out
 
@@ -65,10 +62,74 @@ def run_vsearch(
         "--threads", str(threads),
         "--uc", final_uc,
         "--sizein",
-        "--gapopen", "1000",
-        "--gapext", "1000",
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+# def run_vsearch(
+#     output_fn,
+#     cluster_dir,
+#     threads,
+#     cluster_iterations,
+#     lower_cluster_id,
+#     **kwargs):
+#     makedirs(cluster_dir, exist_ok=True)
+#     # Use vsearch clustering iterativly to cluster sequences by similarity
+#     # Do not allow indels since this was already approximated in the alignment step
+#
+#     input_fasta = output_fn
+#     values = list(np.linspace(0.95, lower_cluster_id, cluster_iterations))
+#     for i in range(cluster_iterations):
+#         i_adj = i * 2
+#         print(f"Running clustering iteration {i+1}")
+#
+#         first_out = path.join(cluster_dir, f"consensus_r{i_adj+1}.fasta")
+#         second_out = path.join(cluster_dir, f"consensus_r{i_adj+2}.fasta")
+#         first_uc = path.join(cluster_dir, f"clusters_r{i_adj+1}.uc")
+#         second_uc = path.join(cluster_dir, f"clusters_r{i_adj+2}.uc")
+#         id = values[i]
+#         second_id = max(0.9, values[i])
+#
+#         cmd = ["vsearch", "--cluster_size", input_fasta,
+#             "--id", str(id),
+#             "--threads", str(threads),
+#             "--consout", first_out,
+#             "--uc", first_uc,
+#             "--sizeout",
+#             "--sizein",
+#             "--clusterout_sort",
+#             "--cons_truncate",
+#             "--gapopen", "1000",
+#             "--gapext", "1000"]
+#         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+#
+#         cmd = ["vsearch", "--cluster_size", first_out,
+#             "--id", str(second_id),
+#             "--threads", str(threads),
+#             "--consout", second_out,
+#             "--uc", second_uc,
+#             "--sizeout",
+#             "--sizein",
+#             "--clusterout_sort",
+#             "--cons_truncate",
+#             "--gapopen", "1000",
+#             "--gapext", "1000"]
+#         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+#         input_fasta = second_out
+#
+#     # Final mapping
+#     final_uc = path.join(cluster_dir, "clustered_barcodes.uc")
+#     cmd = [
+#         "vsearch", "--usearch_global", input_fasta,
+#         "--db", second_out,
+#         "--id", str(id),
+#         "--threads", str(threads),
+#         "--uc", final_uc,
+#         "--sizein",
+#         "--gapopen", "1000",
+#         "--gapext", "1000",
+#     ]
+#     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for_debugging=None, **kwargs):
     # Using cluster information, save all full seqs for a given cluster to a file
@@ -81,7 +142,6 @@ def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for
     for i in range(1, cluster_iterations+1):
         observed = set()
         expand = defaultdict()
-        print(i)
         with open(f"tmp/clusters/clusters_r{i}.uc") as uc:
             for L in uc:
                 if L[0] not in ("S", "H"):

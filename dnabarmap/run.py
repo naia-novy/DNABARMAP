@@ -3,6 +3,7 @@ import argparse
 from os import makedirs, path
 from shutil import rmtree
 
+
 from dnabarmap.array_align import align
 from dnabarmap.cluster import run_vsearch, save_full_seqs
 from dnabarmap.consensus import determine_consensus
@@ -63,17 +64,18 @@ def cli():
     parser.add_argument('--fasta_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataE',
+    parser.add_argument("--base_fn", default='syndata/syndataF',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='NMBKSWSNYRHBMDRKHNRKHMNKVHYDMDYRVDYKVWSWRVYYRRVYVKBWVSVWYVKN',
-
+                        default='ATGCAGRMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVHGCATC',
+                        # default='RMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVH',
                         help='Degenerate reference for conducting approximate alignment of sequences')
-    parser.add_argument("--left_coding_flank", default='CTGCTATCGT',
+
+    parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
-    parser.add_argument("--right_coding_flank", default='ATCTAGCATC',
+    parser.add_argument("--right_coding_flank", default='ATCTAGC',
                         help="Right constant sequence of coding region")
 
     # Alignment parameters
@@ -84,7 +86,7 @@ def cli():
                         help='Multiply per base scores by this value to favor alignment to degenerates with less options')
     parser.add_argument('--minimum_match_fraction', type=float, default=0.75,
                         help='Require at least this fraction of bases to match any reference possiblity for inclusion in clustering')
-    parser.add_argument('--max_len', type=int, default=150,
+    parser.add_argument('--max_len', type=int, default=180,
                         help='Shave off ends of sequences over this length for efficiency, '
                              'reccomended to be at least twice length of barcode')
     parser.add_argument('--buffer', type=int, default=40,
@@ -93,12 +95,12 @@ def cli():
     # Cluster parameters
     parser.add_argument("--cluster_iterations", type=int, default=15, help="Repeat greedy clustering this "
                                                                           "many times with decreasing stringency each iteration")
-    parser.add_argument("--lower_cluster_id", type=float, default=0.7, help="Value between 0 and 1 for "
+    parser.add_argument("--lower_cluster_id", type=float, default=0.75, help="Value between 0 and 1 for "
                                                                            "minimum identify between barcodes for clustering."
                                                                            "Reccomended >0.8, but can be reduced for small libraries")
     parser.add_argument("--min_sequences", type=int, default=25,
                         help="Minimum num_sequences for cluster to be valid >=")
-    parser.add_argument("--threads", type=int, default=16,
+    parser.add_argument("--threads", type=int, default=8,
                         help="Number of threads for clustering")
 
     parser.add_argument("--save_intermediate_files", default=True, action='store_true',

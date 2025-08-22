@@ -4,6 +4,7 @@ import argparse
 from collections import Counter
 from numpy.lib.stride_tricks import sliding_window_view
 
+from dnabarmap.align_actions import best_single_interval
 from dnabarmap.utils import nuc_dict, import_cupy_numpy
 np = import_cupy_numpy()
 
@@ -146,22 +147,24 @@ if __name__ == '__main__':
     # Parameters if generating new barcode
     parser.add_argument('--barcode_len', type=int, default=60,
                         help='Length of barcode when generating')
-    parser.add_argument('--max_homopolymer_len', type=int, default=3,
+    parser.add_argument('--max_homopolymer_len', type=int, default=4,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--iterations', type=int, default=1000,
+    parser.add_argument('--iterations', type=int, default=5000,
                         help='Simulated annealing iterations for each barcode template')
-    parser.add_argument('--ks', type=float, default=[1,2], nargs='+',
+    parser.add_argument('--ks', type=float, default=[], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--num_designs', type=float, default=500,
+    parser.add_argument('--num_designs', type=float, default=200,
                         help='How many times to try optimizing different barcode templates')
 
     args = parser.parse_args()
 
     best_candidates = optimize_barcode_template(args.barcode_len, args.ks, args.num_designs, args.iterations, args.max_homopolymer_len)
-    best_idx = np.argmax([i[1][0] for i in best_candidates])
-    best = best_candidates[best_idx]
     best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
     best_candidates = sorted(best_candidates, key=lambda x: x[1])
+    filtered_candidates = [i for i in best_candidates if all([n not in i[0] for n in nucleotides])]
 
     print('Full results: \n', best_candidates)
-    print(f'\nBest candidate: {best[0], adjust_p(best[1][0])}')
+    print(f'\nBest candidate: {best_candidates[0], adjust_p(best_candidates[1][0])}')
+
+    print('Full results filtered: \n', filtered_candidates)
+    print(f'\nBest filtered candidate: {filtered_candidates[0], adjust_p(filtered_candidates[1][0])}')
