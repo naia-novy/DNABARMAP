@@ -12,10 +12,16 @@ def run_vsearch(
     threads,
     cluster_iterations,
     lower_cluster_id,
+    patience,
     **kwargs):
     makedirs(cluster_dir, exist_ok=True)
     # Use vsearch clustering iterativly to cluster sequences by similarity
     # Do not allow indels since this was already approximated in the alignment step
+
+    if patience > 0:
+        cluster_params = ["--cons_truncate", '--gapopen', '1000', '--gapext', '1000']
+    else:
+        cluster_params = []
 
     input_fasta = output_fn
     values = list(np.linspace(0.98, lower_cluster_id, cluster_iterations))
@@ -37,9 +43,9 @@ def run_vsearch(
             "--uc", first_uc,
             "--sizeout",
             "--sizein",
-            "--clusterout_sort",
-            "--cons_truncate"]
+            "--clusterout_sort"] + cluster_params
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 
         cmd = ["vsearch", "--cluster_size", first_out,
             "--id", str(second_id),
@@ -48,8 +54,7 @@ def run_vsearch(
             "--uc", second_uc,
             "--sizeout",
             "--sizein",
-            "--clusterout_sort",
-            "--cons_truncate"]
+            "--clusterout_sort"] + cluster_params
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         input_fasta = second_out
 
@@ -62,7 +67,7 @@ def run_vsearch(
         "--threads", str(threads),
         "--uc", final_uc,
         "--sizein",
-    ]
+    ] + cluster_params[1:]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

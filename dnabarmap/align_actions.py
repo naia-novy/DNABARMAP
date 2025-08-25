@@ -260,12 +260,12 @@ def find_best_rolls_batch(seqs, refs):
     for idx, shift in enumerate(provided_range):
         rolled_all[:,idx] = np.roll(seqs, shift=shift, axis=2)
 
-    adjacency_matrix = compute_adjacency_score(rolled_all, refs[:, np.newaxis], max_run=10)**2
+    adjacency_matrix = compute_adjacency_score(rolled_all, refs[:, np.newaxis], max_run=10)
     adjacency_score = adjacency_matrix.sum(axis=(-1))
 
     # Pick best roll per sequence
-    direction = np.argmax(np.mean(adjacency_score, axis=1), 0)
-    # smoothed = gaussian_filter1d(adjacency_score[direction, :, np.arange(direction.shape[0])], sigma=5)
+    direction = np.argmax(np.mean(adjacency_score**2, axis=1), 0)
+    # compressed = gaussian_filter1d(adjacency_score[direction, :, np.arange(direction.shape[0])], sigma=0.1)
     compressed = adjacency_score[direction, :, np.arange(direction.shape[0])]
     best_rolls_idx = np.argmax(compressed, axis=-1)
     best_rolls = provided_range[best_rolls_idx]  # shape: (2, n_seqs)

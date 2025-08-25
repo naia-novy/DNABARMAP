@@ -34,24 +34,24 @@ def decode_alignment(sequence, reference=None, reduce=False):
         decoded_sequences.append(''.join(result))
 
 
-    if reference is not None and reduce:
-        # nonred_ref = decoded_sequences[0][:]
-        # decoded_sequences[0] = ''.join([val for i,val in enumerate(nonred_ref) if val != '-'])
-        # decoded_sequences[1] = ''.join([val for i,val in enumerate(decoded_sequences[1]) if nonred_ref[i] != '-'])
-        decoded_sequences[0] = decoded_sequences[0].replace('-', 'N')
-        decoded_sequences[1] = decoded_sequences[1].replace('-', 'N')
-        # decoded_sequences[1] = ''.join([v for i,v in enumerate(decoded_sequences[1]) if decoded_sequences[0][i] not in ['A', 'T', 'C', 'G']])
-        # decoded_sequences[0] = ''.join([i for i in decoded_sequences[0] if i not in ['A', 'T', 'C', 'G']])
-
-
     # if reference is not None and reduce:
-    #     nonred_ref = decoded_sequences[0][:]
-    #     decoded_sequences[0] = ''.join([val for i,val in enumerate(nonred_ref) if val != '-'])
-    #     decoded_sequences[1] = ''.join([val for i,val in enumerate(decoded_sequences[1]) if nonred_ref[i] != '-'])
+    #     # nonred_ref = decoded_sequences[0][:]
+    #     # decoded_sequences[0] = ''.join([val for i,val in enumerate(nonred_ref) if val != '-'])
+    #     # decoded_sequences[1] = ''.join([val for i,val in enumerate(decoded_sequences[1]) if nonred_ref[i] != '-'])
     #     decoded_sequences[0] = decoded_sequences[0].replace('-', 'N')
     #     decoded_sequences[1] = decoded_sequences[1].replace('-', 'N')
     #     # decoded_sequences[1] = ''.join([v for i,v in enumerate(decoded_sequences[1]) if decoded_sequences[0][i] not in ['A', 'T', 'C', 'G']])
     #     # decoded_sequences[0] = ''.join([i for i in decoded_sequences[0] if i not in ['A', 'T', 'C', 'G']])
+
+
+    if reference is not None and reduce:
+        nonred_ref = decoded_sequences[0][:]
+        decoded_sequences[0] = ''.join([val for i,val in enumerate(nonred_ref) if val != '-'])
+        decoded_sequences[1] = ''.join([val for i,val in enumerate(decoded_sequences[1]) if nonred_ref[i] != '-'])
+        decoded_sequences[0] = decoded_sequences[0].replace('-', 'N')
+        decoded_sequences[1] = decoded_sequences[1].replace('-', 'N')
+        # decoded_sequences[1] = ''.join([v for i,v in enumerate(decoded_sequences[1]) if decoded_sequences[0][i] not in ['A', 'T', 'C', 'G']])
+        # decoded_sequences[0] = ''.join([i for i in decoded_sequences[0] if i not in ['A', 'T', 'C', 'G']])
 
     return decoded_sequences
 
@@ -59,10 +59,10 @@ def initialize_sequences(sequences, barcode_template, data,
                          synthetic_data_available, seq_limit_for_debugging, buffer, batch_size, **kwargs):
     # Convert sequences to arrays and do initial approximate alignment
     buffer = int(buffer * 0.75)
-    length_mult = 2
+    length_mult = 2.5
     template_len = len(barcode_template)
     template_len = int(template_len * length_mult)
-    max_len = int(2.5 * len(barcode_template)) # slightly larger so there are sufficient nans
+    max_len = int(3 * len(barcode_template)) # slightly larger so there are sufficient nans
 
     # Initialize top and bottom seq arrays and top reference array
     sequences_A = [i[buffer:buffer + template_len] for i in sequences]
@@ -184,6 +184,9 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     seq_shape = sequence_array.shape[1:]  # e.g. (seq_len, dim)
     batch_seqs_buf = np.empty((Bmax, *seq_shape), dtype=sequence_array.dtype)
     batch_refs_buf = np.empty((Bmax, *reference_array.shape[1:]), dtype=reference_array.dtype)
+
+    if patience == 0:
+        active = False
     while active:
         B = min(len(active), batch_size)
         batch_idxs = [active.popleft() for _ in range(B)]

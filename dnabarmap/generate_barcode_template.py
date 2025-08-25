@@ -170,13 +170,13 @@ if __name__ == '__main__':
     # Parameters if generating new barcode
     parser.add_argument('--barcode_len', type=int, default=60,
                         help='Length of barcode when generating')
-    parser.add_argument('--max_homopolymer_len', type=int, default=3,
+    parser.add_argument('--max_homopolymer_len', type=int, default=4,
                         help='Do not allow sequences with possible homopolymers longer than this value')
     parser.add_argument('--iterations', type=int, default=2500,
                         help='Simulated annealing iterations for each barcode template')
-    parser.add_argument('--ks', type=float, default=[1,2,3,4], nargs='+',
+    parser.add_argument('--ks', type=float, default=[1,2,3,4,5,6,7,8,9,10], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--initial_designs', type=float, default=500,
+    parser.add_argument('--initial_designs', type=float, default=50,
                         help='How many times to try optimizing different barcode templates')
     parser.add_argument('--opt_frac', type=float, default=0.1,
                         help='How many times to try optimizing different barcode templates')
@@ -187,8 +187,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     best_candidates = optimize_barcode_template(**vars(args))
+    best_candidates = sorted(best_candidates, key=lambda x: x[1][0]*x[1][1])
     best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
-    best_candidates = sorted(best_candidates, key=lambda x: x[1])
+
     filtered_candidates = [i for i in best_candidates if all([n not in i[0] for n in nucleotides])]
 
     print('Full results: \n', best_candidates)

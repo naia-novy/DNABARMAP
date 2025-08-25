@@ -28,6 +28,7 @@ def determine_consensus(threads, **kwargs):
                    '-a 0',
                    '-m 1',
                    '-O 4,4',
+                   '-E 1,1',
                    '-Q',
                    '-i',
                    '-s',

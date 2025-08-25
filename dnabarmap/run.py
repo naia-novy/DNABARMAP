@@ -67,8 +67,7 @@ def cli():
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='ATGCAGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNGCATCA',
-                        # default='RMBRWYRWHBMRDBHRVBWBRNMKHVWSWHVBWBSHDVKMBWBVSWVNKMDSWSDNWSVH',
+                        default='TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCTGATC',
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
@@ -77,18 +76,19 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=0,
+    parser.add_argument('--patience', type=int, default=3,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
-    parser.add_argument("--cluster_iterations", type=int, default=25, help="Repeat greedy clustering this "
+    parser.add_argument("--cluster_iterations", type=int, default=50, help="Repeat greedy clustering this "
                                                                           "many times with decreasing stringency each iteration")
-    parser.add_argument("--lower_cluster_id", type=float, default=0.8, help="Value between 0 and 1 for "
+    parser.add_argument("--lower_cluster_id", type=float, default=0.7, help="Value between 0 and 1 for "
                                                                            "minimum identify between barcodes for clustering."
-                                                                           "Reccomended >0.8, but can be reduced for small libraries")
-    parser.add_argument("--min_sequences", type=int, default=25,
+                                                                           "Reccomended >0.7, but can be reduced for small "
+                                                                            "libraries or extra long barcodes")
+    parser.add_argument("--min_sequences", type=int, default=10,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
@@ -134,7 +134,7 @@ def cli():
 
     if args.synthetic_data_available:
         assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
-    if args.min_sequences < 25:
+    if args.min_sequences < 20:
         print('WARNING: min_sequences is less than 25, this is not reccomended and may cause innacurate consensus sequence determination')
 
     makedirs(args.cluster_dir, exist_ok=True)
