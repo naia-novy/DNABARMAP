@@ -163,7 +163,8 @@ def optimize_barcode_template(barcode_len, ks, initial_designs, opt_frac, iterat
 
     return best_candidates
 
-if __name__ == '__main__':
+
+def cli():
     # Optimize template barcodes to have diverse motifs (ks) and large combinatorial space
     parser = argparse.ArgumentParser()
 
@@ -174,7 +175,7 @@ if __name__ == '__main__':
                         help='Do not allow sequences with possible homopolymers longer than this value')
     parser.add_argument('--iterations', type=int, default=2500,
                         help='Simulated annealing iterations for each barcode template')
-    parser.add_argument('--ks', type=float, default=[1,2,3,4,5,6,7,8,9,10], nargs='+',
+    parser.add_argument('--ks', type=float, default=[1,2,3,4,5], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
     parser.add_argument('--initial_designs', type=float, default=50,
                         help='How many times to try optimizing different barcode templates')
@@ -197,3 +198,7 @@ if __name__ == '__main__':
 
     print('Full results filtered: \n', filtered_candidates)
     print(f'Best filtered candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
+
+
+if __name__ == '__main__':
+    cli()

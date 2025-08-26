@@ -3,7 +3,7 @@ from glob import glob
 from os import makedirs, remove
 import time
 
-from utils import import_cupy_numpy
+from dnabarmap.utils import import_cupy_numpy
 
 np = import_cupy_numpy()
 

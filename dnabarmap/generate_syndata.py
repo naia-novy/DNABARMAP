@@ -164,7 +164,7 @@ def main(barcode_template, coding_sequence, left_coding_flank, right_coding_flan
     mapping = data[['true_barcode','variant']].drop_duplicates().reset_index(drop=True)
     mapping.to_csv(mapping_fn.replace('.tsv', '_synthetic.tsv'), sep='\t', index=False)
 
-if __name__ == '__main__':
+def cli():
     parser = argparse.ArgumentParser()
 
     # Parameters if generating new barcode
@@ -213,3 +213,6 @@ if __name__ == '__main__':
         args.barcode_template = generate_barcode_template(**vars(args))
 
     main(**vars(args))
+
+if __name__ == '__main__':
+    cli()

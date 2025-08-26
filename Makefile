@@ -4,9 +4,10 @@
 env:
 	@echo "Creating dnabarmap environment..."
 	conda create -n dnabarmap python=3.10 -y
-	conda install -n dnabarmap -y -c bioconda pbsim3 vsearch abpoa racon minimap2
 	conda run -n dnabarmap pip install -e .
-	conda run -n dnabarmap pip install cuda-cuda12x || true
+	conda install -n dnabarmap -y -c conda-forge libgcc-ng=12
+	conda install -n dnabarmap -y -c conda-forge -c bioconda pbsim3 vsearch abpoa racon minimap2
+    conda install -n dnabarmap -y -c conda-forge cupy cudatoolkit=12.2
 
 # Remove the environment
 clean:

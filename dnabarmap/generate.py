@@ -1,6 +1,6 @@
 import random
 import pandas as pd
-from utils import convert_AA_to_nucleotide, degenerate_map
+from dnabarmap.utils import convert_AA_to_nucleotide, degenerate_map
 
 nuc_dict = {'A': ['A'],
             'T': ['T'],
