@@ -3,7 +3,6 @@ import os
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
-
 def import_cupy_numpy(print_note=False):
     gpu_available = False
     try:

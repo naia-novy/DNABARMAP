@@ -1,9 +1,8 @@
-from scipy.ndimage import gaussian_filter1d
 from collections import defaultdict
-from numpy.lib.stride_tricks import sliding_window_view
 
 from dnabarmap.utils import *
 np = import_cupy_numpy()
+import numpy # Needed for insert functions
 
 def sequences_to_array(sequences, max_len):
     # Convert string based DNA sequences to N x 4 array (int encoding)
@@ -12,6 +11,7 @@ def sequences_to_array(sequences, max_len):
     for i, sequence in enumerate(sequences):
         shift = int((max_len - len(sequence)) / 2)
         indices = [hot_degenerate_base_mapping[base] for base in sequence]
+        indices = np.asarray(indices, dtype=seq_array.dtype)
         seq_array[i, shift:len(indices)+shift, :] = indices
     return seq_array
 
@@ -448,11 +448,38 @@ def _remove_and_insert_nans(seq_slice, ref_slice, positions):
     insert_pos = nan_positions[-1][0] if nan_positions.size > 0 else arrays[0].shape[0]
 
     # Insert NaNs for each removed position
-    for _ in range(len(positions)):
-        arrays[0] = np.insert(arrays[0], insert_pos, np.nan, axis=0)
-        arrays[1] = np.insert(arrays[1], insert_pos, np.nan, axis=0)
+    try:
+        GPU_available = np.cuda.runtime.getDeviceCount() # Will fail if no GPU
+        # Send to CPU
+        arr0 = arrays[0].get()
+        arr1 = arrays[1].get()
+        # Do CPU inserts
+        for _ in range(len(positions)):
+            arr0 = numpy.insert(arr0, insert_pos, np.nan, axis=0)
+            arr1 = numpy.insert(arr1, insert_pos, np.nan, axis=0)
+        # Send back to GPU
+        arrays[0] = np.asarray(arr0)
+        arrays[1] = np.asarray(arr1)
+    except:
+        for _ in range(len(positions)):
+            arrays[0] = np.insert(arrays[0], insert_pos, np.nan, axis=0)
+            arrays[1] = np.insert(arrays[1], insert_pos, np.nan, axis=0)
 
     return arrays
+
+
+def shift(true_shift1, true_shift2, seq, ref):
+    if true_shift1 > 0:
+        ref = np.insert(ref, [p1] * true_shift1, 6, axis=0)
+    elif true_shift1 < 0:
+        seq = np.insert(seq, [p1] * abs(true_shift1), 6, axis=0)
+
+    if true_shift2 > 0:
+        ref = np.insert(ref, [p2] * true_shift2, 6, axis=0)
+    else:
+        seq = np.insert(seq, [p2] * abs(true_shift2), 6, axis=0)
+
+    return ref, seq
 
 def apply_alignment_vectorized(sequence_array, reference_array, sug, target_len):
     # Rapid alignment of seq and barcode given suggestion for indels
@@ -464,15 +491,20 @@ def apply_alignment_vectorized(sequence_array, reference_array, sug, target_len)
         true_shift1, true_shift2 = ps[p1], ps[p2]
         seq, ref = sequence_array[idx].copy(), reference_array[idx].copy()
 
-        if true_shift1 > 0:
-            ref = np.insert(ref, [p1] * true_shift1, 6, axis=0)
-        elif true_shift1 < 0:
-            seq = np.insert(seq, [p1] * abs(true_shift1), 6, axis=0)
+        # Insert NaNs for each removed position
+        try:
+            GPU_available = np.cuda.runtime.getDeviceCount()  # Will fail if no GPU
+            # Send to CPU
+            ref = ref.get()
+            seq = seq.get()
 
-        if true_shift2 > 0:
-            ref = np.insert(ref, [p2] * true_shift2, 6, axis=0)
-        else:
-            seq = np.insert(seq, [p2]*abs(true_shift2), 6, axis=0)
+            ref, seq = shift(true_shift1, true_shift2, seq, ref) # Do CPU inserts
+
+            # Send back to GPU
+            seq = np.asarray(seq)
+            ref = np.asarray(ref)
+        except:
+            ref, seq = shift(true_shift1, true_shift2, seq, ref)
 
         new_seq, new_ref = remove_nans_and_align(seq, ref, target_len)
 

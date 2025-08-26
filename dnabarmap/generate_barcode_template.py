@@ -50,6 +50,39 @@ def calculate_mean_p(template, adjust=True):
 def score_template(template, k):
     return calculate_mean_p(template), expanded_motif_penalty(template, k)
 
+
+def dominates(a: tuple, b: tuple) -> bool:
+    return (a[0] >= b[0] and a[1] <= b[1]) and (a[0] > b[0] or a[1] < b[1])
+
+def pareto_front(candidates: list) -> list:
+    front = []
+    for tpl, score in candidates:
+        if not any(dominates(other_score, score) for _, other_score in candidates if other_score != score):
+            front.append((tpl, score))
+    return front
+
+def pick_elbow_candidate(pareto_candidates: list) -> tuple:
+    # Prepare points: sort by penalty ascending
+    pts = sorted(pareto_candidates, key=lambda x: x[1][1])
+    # Convert to numeric arrays
+    xs = [pt[1][1] for pt in pts]  # penalty
+    ys = [pt[1][0] for pt in pts]  # entropy
+    # Line endpoints
+    x1, y1 = xs[0], ys[0]
+    x2, y2 = xs[-1], ys[-1]
+    # Compute distances
+    max_dist = -1
+    elbow_idx = 0
+    for i, (x0, y0) in enumerate(zip(xs, ys)):
+        # distance from (x0,y0) to line through (x1,y1)-(x2,y2)
+        num = abs((y2 - y1)*x0 - (x2 - x1)*y0 + x2*y1 - y2*x1)
+        den = math.hypot(y2 - y1, x2 - x1)
+        dist = num/den if den else 0
+        if dist > max_dist:
+            max_dist = dist
+            elbow_idx = i
+    return pts[elbow_idx]
+
 def expanded_motif_penalty(template, ks):
     _BASE = {'A': 1, 'C': 2, 'G': 4, 'T': 8}
     _POP = np.array([bin(i).count("1") for i in range(16)], dtype=np.uint8)
@@ -123,6 +156,7 @@ def mutate(template, max_homopolymer_len, iterations, no_gquad):
         return template[:pos] + new_c + template[pos+1:]
     return template
 
+
 def optimize_barcode_template(barcode_len, ks, initial_designs, opt_frac, iterations=1000,
                               max_homopolymer_len=3, no_gquad=False, initial_temp=0.1, **kwargs):
     num_designs = int(initial_designs * opt_frac)
@@ -149,17 +183,21 @@ def optimize_barcode_template(barcode_len, ks, initial_designs, opt_frac, iterat
             proposal = mutate(d, max_homopolymer_len, iterations, no_gquad)
             prop_score = score_template(proposal, ks)
             delta = prop_score[0]*prop_score[1] - current_score[0]*current_score[1]
-            if delta > 0 or random.random() < math.exp(delta / temp):
+            # delta = (prop_score[0]/(1+prop_score[1]) - current_score[0]/(1+current_score[1]))
+
+            if delta >= 0 or random.random() < math.exp(delta / temp):
                 d, current_score = proposal, prop_score
                 candidates.append((d, current_score))
-            temp = temps[i]
             track.append(current_score[0])
+            temp = temps[i]
+
+        best_candidates.append((d, current_score))
 
         # sns.lineplot(track)
         # plt.show()
 
-        best = sorted(candidates, key=lambda x: x[1][0])[-1]
-        best_candidates.append(best)
+        # best = sorted(candidates, key=lambda x: x[1][0])[-1]
+        # best_candidates.append(best)
 
     return best_candidates
 
@@ -177,9 +215,9 @@ def cli():
                         help='Simulated annealing iterations for each barcode template')
     parser.add_argument('--ks', type=float, default=[1,2,3,4,5], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--initial_designs', type=float, default=50,
+    parser.add_argument('--initial_designs', type=float, default=200,
                         help='How many times to try optimizing different barcode templates')
-    parser.add_argument('--opt_frac', type=float, default=0.1,
+    parser.add_argument('--opt_frac', type=float, default=0.5,
                         help='How many times to try optimizing different barcode templates')
     parser.add_argument('--no_gquad', default=True, action='store_true',
                         help='Eliminate the possiblility of G quadraplexes by not allowing 3 consecutive gs'
@@ -187,17 +225,23 @@ def cli():
 
     args = parser.parse_args()
 
-    best_candidates = optimize_barcode_template(**vars(args))
-    best_candidates = sorted(best_candidates, key=lambda x: x[1][0]*x[1][1])
+    candidates = optimize_barcode_template(**vars(args))
+    pareto_candidates = pareto_front(candidates)
+    # best_candidates = sorted(candidates, key=lambda x: x[1][0]*x[1][1])
+    # best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
+    best_candidates = sorted(pareto_candidates, key=lambda x: x[1][0]*x[1][1])
     best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
-
     filtered_candidates = [i for i in best_candidates if all([n not in i[0] for n in nucleotides])]
+    # print('Full results: \n', best_candidates)
+    # print(f'Best candidate: {best_candidates[0][1], best_candidates[0][1]}\n')
 
-    print('Full results: \n', best_candidates)
-    print(f'Best candidate: {best_candidates[0][1], best_candidates[0][1]}\n')
+    print('Full filtered: \n', filtered_candidates)
+    print(f'Best candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
 
-    print('Full results filtered: \n', filtered_candidates)
-    print(f'Best filtered candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
+    x = [i[1][0] for i in pareto_candidates]
+    y = [i[1][1] for i in pareto_candidates]
+    sns.scatterplot(x=x, y=y)
+    plt.show()
 
 
 if __name__ == '__main__':
