@@ -12,7 +12,8 @@ def import_cupy_numpy(print_note=False):
         if device_count == 0:
             print("No GPU devices found")
         else:
-            print(f"{device_count} GPU devices found")
+            if print_note:
+                print(f"{device_count} GPU devices found")
             gpu_available = True
     except Exception:
         import numpy as np

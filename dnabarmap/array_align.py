@@ -1,9 +1,13 @@
 import argparse
 from collections import deque
-from dnabarmap.align_actions import *
-
+import pandas as pd
+import os
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+from dnabarmap.align_actions import *
+from dnabarmap.utils import read_fastq, write_full_fastq, degenerate_nucleotide_mapping, reverse_complement
+
 
 
 def decode_alignment(sequence, reference=None, reduce=False):
@@ -33,17 +37,6 @@ def decode_alignment(sequence, reference=None, reduce=False):
             result.append(nucleotide)
         decoded_sequences.append(''.join(result))
 
-
-    # if reference is not None and reduce:
-    #     # nonred_ref = decoded_sequences[0][:]
-    #     # decoded_sequences[0] = ''.join([val for i,val in enumerate(nonred_ref) if val != '-'])
-    #     # decoded_sequences[1] = ''.join([val for i,val in enumerate(decoded_sequences[1]) if nonred_ref[i] != '-'])
-    #     decoded_sequences[0] = decoded_sequences[0].replace('-', 'N')
-    #     decoded_sequences[1] = decoded_sequences[1].replace('-', 'N')
-    #     # decoded_sequences[1] = ''.join([v for i,v in enumerate(decoded_sequences[1]) if decoded_sequences[0][i] not in ['A', 'T', 'C', 'G']])
-    #     # decoded_sequences[0] = ''.join([i for i in decoded_sequences[0] if i not in ['A', 'T', 'C', 'G']])
-
-
     if reference is not None and reduce:
         nonred_ref = decoded_sequences[0][:]
         decoded_sequences[0] = ''.join([val for i,val in enumerate(nonred_ref) if val != '-'])
@@ -59,14 +52,15 @@ def initialize_sequences(sequences, barcode_template, data,
                          synthetic_data_available, seq_limit_for_debugging, buffer, batch_size, **kwargs):
     # Convert sequences to arrays and do initial approximate alignment
     buffer = int(buffer * 0.75)
-    length_mult = 2.5
+    length_mult = 3
     template_len = len(barcode_template)
     template_len = int(template_len * length_mult)
-    max_len = int(3 * len(barcode_template)) # slightly larger so there are sufficient nans
+    max_len = int(3.5 * len(barcode_template)) # slightly larger so there are sufficient nans
 
     # Initialize top and bottom seq arrays and top reference array
     sequences_A = [i[buffer:buffer + template_len] for i in sequences]
     sequences_B = [reverse_complement(i)[buffer:buffer + template_len] for i in sequences]
+
 
     reference_array = reference_to_array(barcode_template, max_len)
     seq_A_array = sequences_to_array(sequences_A, reference_array.shape[-1])
@@ -80,7 +74,7 @@ def initialize_sequences(sequences, barcode_template, data,
 
     # Score top and bottom strand alignments to orient and approximately position sequences
     score_array = np.zeros((2, sequence_array.shape[1]))
-    directions = np.zeros(sequence_array.shape[1], dtype=int)
+    directions = np.zeros(sequence_array.shape[1], dtype=np.int32)
     best_rolls = np.zeros(sequence_array.shape[1])
     for batch_idx in range(0, seq_stacked.shape[1], batch_size):
         batch_end = min(batch_idx + batch_size, seq_stacked.shape[1])
@@ -95,11 +89,11 @@ def initialize_sequences(sequences, barcode_template, data,
 
     # Gather sequences corresponding to best strand
     batch_idxs = np.arange(score_array.shape[1])
-    best_sequences = sequence_array[directions.astype(int), batch_idxs]
-    best_sequences = roll_batch(best_sequences, best_rolls.astype(int))  # reroll best sequences
+    best_sequences = sequence_array[directions.astype(np.int32), batch_idxs]
+    best_sequences = roll_batch(best_sequences, best_rolls.astype(np.int32))  # reroll best sequences
 
     if synthetic_data_available:
-        print(f'If using synthetic data, number of incorrectly oriented sequences: {directions.astype(int).sum()}')
+        print(f'If using synthetic data, number of incorrectly oriented sequences: {directions.astype(np.int32).sum()}')
         report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging,
                                 range(best_sequences.shape[0]))
 
@@ -177,7 +171,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
 
     N = sequence_array.shape[0]
     active = deque(range(N))  # all indices start “active”
-    patience_counter = np.zeros(N, dtype=int)
+    patience_counter = np.zeros(N, dtype=np.int32)
 
     # Pre allocate batch buffer for efficency
     Bmax = batch_size
@@ -189,8 +183,12 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
         active = False
     while active:
         B = min(len(active), batch_size)
-        batch_idxs = [active.popleft() for _ in range(B)]
-        batch_idxs = np.array(batch_idxs, dtype=int)
+        batch_idxs = [int(active.popleft()) for _ in range(B)]
+        print(batch_idxs)
+        print(type(batch_idxs[0]))
+        print(np)
+        batch_idxs = np.array(batch_idxs, dtype=np.int32)
+
 
         patience_counter[batch_idxs] += 1
         b = len(batch_idxs)  # actual batch size this iteration
@@ -246,7 +244,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
         batch_ref = reference_array[i:i + batch_size]
         score = score_sequences_simple(batch_seq, batch_ref)
 
-        score = (score > 0).astype(int)
+        score = (score > 0).astype(np.int32)
         scores.append(score.sum(axis=-1))  # sum over sequence length
     scores = np.concatenate(scores, axis=0)
 

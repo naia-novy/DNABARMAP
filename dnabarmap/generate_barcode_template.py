@@ -28,6 +28,7 @@ def could_form_homopolymer(template, max_homopolymer_len):
     return False
 
 def adjust_p(p):
+    return p
     adj_p = (1/p)
 
     return adj_p
@@ -48,7 +49,7 @@ def calculate_mean_p(template, adjust=True):
         return p
 
 def score_template(template, k):
-    return calculate_mean_p(template), expanded_motif_penalty(template, k)
+    return expanded_motif_penalty(template, k), calculate_mean_p(template)
 
 
 def dominates(a: tuple, b: tuple) -> bool:
@@ -182,8 +183,8 @@ def optimize_barcode_template(barcode_len, ks, initial_designs, opt_frac, iterat
         for i in range(iterations):
             proposal = mutate(d, max_homopolymer_len, iterations, no_gquad)
             prop_score = score_template(proposal, ks)
-            delta = prop_score[0]*prop_score[1] - current_score[0]*current_score[1]
-            # delta = (prop_score[0]/(1+prop_score[1]) - current_score[0]/(1+current_score[1]))
+            # delta = prop_score[0]*prop_score[1] - current_score[0]*current_score[1]
+            delta = (prop_score[0]/(1+prop_score[1]) - current_score[0]/(1+current_score[1]))
 
             if delta >= 0 or random.random() < math.exp(delta / temp):
                 d, current_score = proposal, prop_score
@@ -211,13 +212,13 @@ def cli():
                         help='Length of barcode when generating')
     parser.add_argument('--max_homopolymer_len', type=int, default=4,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--iterations', type=int, default=2500,
+    parser.add_argument('--iterations', type=int, default=5000,
                         help='Simulated annealing iterations for each barcode template')
     parser.add_argument('--ks', type=float, default=[1,2,3,4,5], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
     parser.add_argument('--initial_designs', type=float, default=200,
                         help='How many times to try optimizing different barcode templates')
-    parser.add_argument('--opt_frac', type=float, default=0.5,
+    parser.add_argument('--opt_frac', type=float, default=0.75,
                         help='How many times to try optimizing different barcode templates')
     parser.add_argument('--no_gquad', default=True, action='store_true',
                         help='Eliminate the possiblility of G quadraplexes by not allowing 3 consecutive gs'
@@ -230,19 +231,22 @@ def cli():
     # best_candidates = sorted(candidates, key=lambda x: x[1][0]*x[1][1])
     # best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
     best_candidates = sorted(pareto_candidates, key=lambda x: x[1][0]*x[1][1])
-    best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
-    filtered_candidates = [i for i in best_candidates if all([n not in i[0] for n in nucleotides])]
+    # best_candidates = [(x[0], x[1][0]) for x in best_candidates]
+    filtered_candidates = [(i[0], (adjust_p(i[1][0]), i[1][1]))  for i in best_candidates if all([n not in i[0] for n in nucleotides])]
+
     # print('Full results: \n', best_candidates)
     # print(f'Best candidate: {best_candidates[0][1], best_candidates[0][1]}\n')
 
     print('Full filtered: \n', filtered_candidates)
     print(f'Best candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
 
-    x = [i[1][0] for i in pareto_candidates]
-    y = [i[1][1] for i in pareto_candidates]
+    x = [i[1][0] for i in filtered_candidates]
+    y = [i[1][1] for i in filtered_candidates]
     sns.scatterplot(x=x, y=y)
     plt.show()
 
+    elbow_candidate = pick_elbow_candidate(filtered_candidates)
+    print(f'Elbow candidate: {elbow_candidate[0], elbow_candidate[1]}')
 
 if __name__ == '__main__':
     cli()

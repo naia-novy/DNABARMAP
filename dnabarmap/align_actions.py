@@ -1,8 +1,10 @@
 from collections import defaultdict
 
-from dnabarmap.utils import *
+from dnabarmap.utils import hot_degenerate_base_mapping, import_cupy_numpy
+import numpy as numpy # Needed for insert functions
 np = import_cupy_numpy()
-import numpy # Needed for insert functions
+
+from scipy.ndimage import gaussian_filter1d
 
 def sequences_to_array(sequences, max_len):
     # Convert string based DNA sequences to N x 4 array (int encoding)
@@ -83,20 +85,20 @@ def compute_adjacency_score(seqs, refs, max_run):
 
     if len(scores.shape) == 4:
         d, r, E, B = scores.shape
-        final_scores = np.zeros((d, r, E, B), dtype=float)
+        final_scores = np.zeros((d, r, E, B), dtype=np.float32)
         slices = [np.pad(scores[..., i:], ((0, 0), (0,0), (0, 0), (0,i))) for i in range(max_run)]
     elif len(scores.shape) == 3:
         a, E, B= scores.shape
-        final_scores = np.zeros((a, E, B), dtype=float)
+        final_scores = np.zeros((a, E, B), dtype=np.float32)
         slices = [np.pad(scores[..., i:], ((0, 0), (0,0), (0,i))) for i in range(max_run)]
     else:
         E, B= scores.shape
-        final_scores = np.zeros((E, B), dtype=float)
+        final_scores = np.zeros((E, B), dtype=np.float32)
         slices = [np.pad(scores[..., i:], ((0, 0), (0,i))) for i in range(max_run)]
 
     for run_len in range(1, max_run + 1):
-        result_fw = np.prod(slices[:run_len], axis=0)
-        result_rv = np.prod(slices[-run_len:], axis=0)
+        result_fw = np.prod(np.stack(slices[:run_len], axis=0), axis=0)
+        result_rv = np.prod(np.stack(slices[-run_len:], axis=0), axis=0)
         final_scores += result_fw + result_rv
 
     return final_scores
@@ -160,10 +162,15 @@ def best_single_interval(arr, A, B, relevant_range, valid, valid_bound, min_len=
 def get_precise_topk(scores: np.ndarray, patience: np.ndarray) -> np.ndarray:
     # Precise (tie breaking) of top k wins for tradeoff of efficiency and accuracy
     B, L = scores.shape
-    max_patience = patience.max()
+    max_patience = int(patience.max())
 
     topk_part = np.argpartition(scores, -max_patience, axis=1)[:, -max_patience:]  # shape (B, max_k)
-    best_idx = np.empty(B, dtype=int)
+
+    # if int(max_patience) > 0:
+    #     topk_part = np.argpartition(scores, -max_patience, axis=1)[:, -max_patience:]  # shape (B, max_k)
+    # else:
+    #     topk_part = scores.max(axis=1)
+    best_idx = np.empty(B, dtype=np.int32)
 
     # Stage 2: for each unique k, do a tiny stable sort on just those max_k values
     for k in np.unique(patience):
@@ -185,6 +192,7 @@ def get_precise_topk(scores: np.ndarray, patience: np.ndarray) -> np.ndarray:
 
 def expand_bounds(mask, n):
     expanded = np.zeros_like(mask)
+    n = int(n)
     for shift in range(-n, n+1):
         if shift < 0:
             expanded[:, :shift] |= mask[:, -shift:]
@@ -202,7 +210,7 @@ def find_suggestions(seqs, refs, patience, valid_bound):
     ps = [i/sum(ps) for i in ps]
     max_shift = np.random.choice(max_shifts, p=ps, size=1)[0]
     valid_bound = expand_bounds(valid_bound, max_shift)
-    relevant_range = np.arange(-max_shift, max_shift + 1, dtype=int)
+    relevant_range = np.arange(-int(max_shift), int(max_shift) + 1, dtype=np.int32)
 
     n_rolls = len(relevant_range)
     n_seqs, seq_len, _ = seqs.shape
@@ -264,10 +272,18 @@ def find_best_rolls_batch(seqs, refs):
     adjacency_score = adjacency_matrix.sum(axis=(-1))
 
     # Pick best roll per sequence
-    direction = np.argmax(np.mean(adjacency_score**2, axis=1), 0)
-    # compressed = gaussian_filter1d(adjacency_score[direction, :, np.arange(direction.shape[0])], sigma=0.1)
-    compressed = adjacency_score[direction, :, np.arange(direction.shape[0])]
-    best_rolls_idx = np.argmax(compressed, axis=-1)
+    direction = np.argmax(np.mean(adjacency_score, axis=1), 0)
+
+    top_arrays = adjacency_score[direction, :, np.arange(direction.shape[0])]
+    if hasattr(top_arrays, "get"):  # CuPy array
+        arr = top_arrays.get()  # move to NumPy
+        smoothed = gaussian_filter1d(arr, axis=-1, sigma=2)
+        smoothed = np.asarray(smoothed) # send back to CuPy
+    else:
+        # Run with numpy only
+        smoothed = gaussian_filter1d(top_arrays, axis=-1, sigma=2)
+
+    best_rolls_idx = np.argmax(smoothed, axis=-1)
     best_rolls = provided_range[best_rolls_idx]  # shape: (2, n_seqs)
 
     return best_rolls, direction
@@ -281,7 +297,8 @@ def roll_batch(batch_array, roll_values):
     for idx, shift in enumerate(roll_values):
         if shift == 0:
             continue
-        shift_groups[shift].append(idx)
+        key = int(shift)  # ensure hashable
+        shift_groups[key].append(idx)
 
     # Apply roll per unique shift
     for shift, indices in shift_groups.items():
@@ -396,9 +413,10 @@ def _find_positions_to_remove(seq, ref):
 
 def _process_position_removal(seq, ref, remove_positions):
     # Sort positions for removal from highest to lowest index
-    sorted_positions = remove_positions[np.lexsort((-remove_positions[:, 2],
-                                                    -remove_positions[:, 1],
-                                                    -remove_positions[:, 0]))][::-1]
+    keys = np.stack([-remove_positions[:, 2],
+                     remove_positions[:, 1],
+                     remove_positions[:, 0]])
+    sorted_positions = remove_positions[np.lexsort(keys)][::-1]
 
     # Group positions by (s, i) coordinates
     position_groups = _group_positions_by_coordinates(sorted_positions)
@@ -453,6 +471,7 @@ def _remove_and_insert_nans(seq_slice, ref_slice, positions):
         # Send to CPU
         arr0 = arrays[0].get()
         arr1 = arrays[1].get()
+        insert_pos = insert_pos.get()
         # Do CPU inserts
         for _ in range(len(positions)):
             arr0 = numpy.insert(arr0, insert_pos, np.nan, axis=0)
@@ -468,16 +487,16 @@ def _remove_and_insert_nans(seq_slice, ref_slice, positions):
     return arrays
 
 
-def shift(true_shift1, true_shift2, seq, ref):
+def shift(true_shift1, true_shift2, seq, ref, p1, p2):
     if true_shift1 > 0:
-        ref = np.insert(ref, [p1] * true_shift1, 6, axis=0)
+        ref = numpy.insert(ref, [p1] * true_shift1, 6, axis=0)
     elif true_shift1 < 0:
-        seq = np.insert(seq, [p1] * abs(true_shift1), 6, axis=0)
+        seq = numpy.insert(seq, [p1] * abs(true_shift1), 6, axis=0)
 
     if true_shift2 > 0:
-        ref = np.insert(ref, [p2] * true_shift2, 6, axis=0)
+        ref = numpy.insert(ref, [p2] * true_shift2, 6, axis=0)
     else:
-        seq = np.insert(seq, [p2] * abs(true_shift2), 6, axis=0)
+        seq = numpy.insert(seq, [p2] * abs(true_shift2), 6, axis=0)
 
     return ref, seq
 
@@ -498,13 +517,13 @@ def apply_alignment_vectorized(sequence_array, reference_array, sug, target_len)
             ref = ref.get()
             seq = seq.get()
 
-            ref, seq = shift(true_shift1, true_shift2, seq, ref) # Do CPU inserts
+            ref, seq = shift(true_shift1, true_shift2, seq, ref, p1, p2) # Do CPU inserts
 
             # Send back to GPU
             seq = np.asarray(seq)
             ref = np.asarray(ref)
         except:
-            ref, seq = shift(true_shift1, true_shift2, seq, ref)
+            ref, seq = shift(true_shift1, true_shift2, seq, ref, p1, p2)
 
         new_seq, new_ref = remove_nans_and_align(seq, ref, target_len)
 

@@ -62,12 +62,12 @@ def cli():
     parser.add_argument('--fastq_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataF',
+    parser.add_argument("--base_fn", default='syndata/syndataG',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='NNHRBNHNRBNWBVHBDVHRYBNVDHBRNNHSDHDVBHDBMNDNYVBDHNSDBHVNWBNV',
+                        default='TATGATNNBMDVNBHDMNBVWDRBNMNDBVWNBDVWVBNRHBNMDBVHNDBVHRDBHVDNSHDNBVCTGATC',
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
@@ -76,15 +76,15 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=3,
+    parser.add_argument('--patience', type=int, default=0,
                         help='How many times to try next best suggestion before giving up during alignment')
-    parser.add_argument('--buffer', type=int, default=40,
+    parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
     # Cluster parameters
-    parser.add_argument("--cluster_iterations", type=int, default=50, help="Repeat greedy clustering this "
+    parser.add_argument("--cluster_iterations", type=int, default=30, help="Repeat greedy clustering this "
                                                                           "many times with decreasing stringency each iteration")
-    parser.add_argument("--lower_cluster_id", type=float, default=0.7, help="Value between 0 and 1 for "
+    parser.add_argument("--lower_cluster_id", type=float, default=0.75, help="Value between 0 and 1 for "
                                                                            "minimum identify between barcodes for clustering."
                                                                            "Reccomended >0.7, but can be reduced for small "
                                                                             "libraries or extra long barcodes")

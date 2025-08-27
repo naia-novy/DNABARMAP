@@ -1,7 +1,6 @@
 import subprocess
 from glob import glob
 from os import makedirs, remove
-import time
 
 from dnabarmap.utils import import_cupy_numpy
 
@@ -50,7 +49,7 @@ def determine_consensus(threads, **kwargs):
                    draft_paf,
                    draft_path,
                    '--no-trimming',
-                   '-q 5',
+                   '-q 7',
                    '-w 2500', # perform poa on majority/all sequence length since they are already clustered
                    '-t', str(threads)]
             subprocess.run(cmd, stdout=out_cons, stderr=subprocess.DEVNULL, check=True)

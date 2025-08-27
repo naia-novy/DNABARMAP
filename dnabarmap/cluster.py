@@ -34,7 +34,7 @@ def run_vsearch(
         first_uc = path.join(cluster_dir, f"clusters_r{i_adj+1}.uc")
         second_uc = path.join(cluster_dir, f"clusters_r{i_adj+2}.uc")
         id = values[i]
-        second_id = max(0.9, values[i])
+        second_id = max(1.0, values[i])
 
         cmd = ["vsearch", "--cluster_size", input_fasta,
             "--id", str(id),
