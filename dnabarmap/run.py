@@ -76,7 +76,7 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=0,
+    parser.add_argument('--patience', type=int, default=1,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
@@ -141,7 +141,7 @@ def cli():
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
-    args.seq_limit_for_debugging = None # 10000
+    args.seq_limit_for_debugging = 1000 # 10000
 
     main(**vars(args))
 

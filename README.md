@@ -86,16 +86,12 @@ CLI help
 
 For full options and flags:
 
-bash
-
-CopyEdit
-
 `dnabarmap --help
 generate_syndata --help
 generate_barcode_template --help`
 
 
-Important flags:
+### Important flags:
 
 --barcode_template
 
@@ -115,11 +111,11 @@ Ignore clusters with less than this number of sequences
 
 Citation
 --------
-If you use DNABARMAP in published work, please cite:
+### If you use DNABARMAP in published work, please cite:
 
-`Paper to be published`
+Paper to be published
 
-Also acknowledge the following third-party tools used by DNABARMAP:
+### Also acknowledge the following third-party tools used by DNABARMAP:
 
 vsearch:
 Rognes T, Flouri T, Nichols B, Quince C, Mahé F. (2016) VSEARCH: a versatile open source tool for metagenomics. PeerJ 4:e2584. doi: 10.7717/peerj.2584

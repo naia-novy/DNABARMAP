@@ -32,7 +32,10 @@ def decode_alignment(sequence, reference=None, reduce=False):
     for input in sequences:
         result = []
         for row in input:
-            key = tuple((row).astype(int))
+            try:
+                key = tuple((row.astype(int).get()))
+            except:
+                key = tuple((row).astype(int))
             nucleotide = degenerate_nucleotide_mapping.get(key, '-')
             result.append(nucleotide)
         decoded_sequences.append(''.join(result))
@@ -184,9 +187,6 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     while active:
         B = min(len(active), batch_size)
         batch_idxs = [int(active.popleft()) for _ in range(B)]
-        print(batch_idxs)
-        print(type(batch_idxs[0]))
-        print(np)
         batch_idxs = np.array(batch_idxs, dtype=np.int32)
 
 
