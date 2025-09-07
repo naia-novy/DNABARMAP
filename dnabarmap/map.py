@@ -9,13 +9,13 @@ def determine_mapping(consensus_dir, barcode_template, left_coding_flank, right_
     if not consensus_dir.endswith('/'):
         consensus_dir += '/'
 
-    consensus_files = glob(f"tmp/consensus/consensus_*/cluster_*_consensus.fasta")
+    consensus_files = glob(f"temp/consensus/consensus_*/cluster_*_consensus.fasta")
     print(f"Determining mapping for {len(consensus_files)} consensus sequences")
 
     if len(consensus_files) == 0:
         raise Exception("No consensus sequences found. Consider altering hyperparameters or doing deeper sequencing.")
 
-    left_fuzz, right_fuzz = min(1, int(len(left_coding_flank)*0.2)), min(1, int(len(right_coding_flank)*0.2))
+    left_fuzz, right_fuzz = min(1, int(len(left_coding_flank)*0.1)), min(1, int(len(right_coding_flank)*0.1))
     bar_fuzz = min(1, int(len(barcode_template)*0.1))
     barcode_regex = build_degenerate_regex(barcode_template)
     combined_regex = regex.compile(fr"({barcode_regex}){{s<={bar_fuzz}}}[ATCGN]*{left_coding_flank}{{s<={left_fuzz}}}([ATCGN]*){right_coding_flank}{{s<={right_fuzz}}}", flags=regex.BESTMATCH)

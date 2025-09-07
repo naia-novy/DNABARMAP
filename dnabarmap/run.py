@@ -4,7 +4,7 @@ from os import makedirs, path
 from shutil import rmtree
 
 from dnabarmap.array_align import align
-from dnabarmap.cluster import run_vsearch, save_full_seqs
+from dnabarmap.cluster import cluster, save_full_seqs
 from dnabarmap.consensus import determine_consensus
 from dnabarmap.map import determine_mapping
 
@@ -13,10 +13,9 @@ def main(**kwargs):
     initial_time = time.time()
     kwargs['input_fn'] = kwargs['fastq_fn']
     kwargs['fastq_fn'] = kwargs['input_fn'].replace('.pkl', '.fastq') # in case synthetic data
-    barcode_out = 'tmp/'+kwargs['input_fn'].split('/')[-1].split('.')[0] + '_barcodes.fasta'
-    filtered_fn = barcode_out.replace('_barcodes.fasta', '_filtered.fastq')
+    barcode_out = 'temp/'+kwargs['input_fn'].split('/')[-1].split('.')[0] + '_barcodes.fasta'
     kwargs['output_fn'] = barcode_out
-    kwargs['filtered_fn'] = filtered_fn
+    kwargs['reoriented_fn'] = kwargs['fastq_fn'].replace('.fastq', '_reoriented.fastq')
 
     # Extract and align barcodes using approximate alignment to degenerate reference
     print('Aligning barcodes...')
@@ -25,13 +24,10 @@ def main(**kwargs):
     align_time = time.time() - align_start_time
     print(f'Finished aligning and extracting barcodes in {round(align_time / 60, 1)} minutes\n')
 
-    # Adjustment if using synthetic data for validation
-    kwargs['fasta_fn'] = filtered_fn
-
     # Cluster aligned barcodes using vsearch
     print('Clustering barcodes...')
     cluster_start_time = time.time()
-    run_vsearch(**kwargs)
+    cluster(**kwargs)
     save_full_seqs(**kwargs)
     cluster_time = time.time() - cluster_start_time
     print(f'Finished clustering barcodes in {round(cluster_time / 60, 1)} minutes\n')
@@ -62,12 +58,12 @@ def cli():
     parser.add_argument('--fastq_fn', type=str, default=None)
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataG',
+    parser.add_argument("--base_fn", default='syndata/syndataB',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='TATGATNNBMDVNBHDMNBVWDRBNMNDBVWNBDVWVBNRHBNMDBVHNDBVHRDBHVDNSHDNBVCTGATC',
+                        default='NKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKB',
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
@@ -76,19 +72,17 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=1,
+    parser.add_argument('--patience', type=int, default=0,
                         help='How many times to try next best suggestion before giving up during alignment')
     parser.add_argument('--buffer', type=int, default=30,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
-    # Cluster parameters
-    parser.add_argument("--cluster_iterations", type=int, default=30, help="Repeat greedy clustering this "
-                                                                          "many times with decreasing stringency each iteration")
-    parser.add_argument("--lower_cluster_id", type=float, default=0.75, help="Value between 0 and 1 for "
+
+    parser.add_argument("--id", type=float, default=0.8, help="Value between 0 and 1 for "
                                                                            "minimum identify between barcodes for clustering."
                                                                            "Reccomended >0.7, but can be reduced for small "
                                                                             "libraries or extra long barcodes")
-    parser.add_argument("--min_sequences", type=int, default=10,
+    parser.add_argument("--min_sequences", type=int, default=15,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
@@ -101,7 +95,7 @@ def cli():
     args = parser.parse_args()
 
     # Set up directories and filenames
-    args.output_dir = 'tmp/'
+    args.output_dir = 'temp/'
     args.cluster_dir = args.output_dir + '/clusters/'
     args.consensus_dir = args.output_dir + '/consensus/'
 
@@ -129,24 +123,25 @@ def cli():
         rmtree(args.cluster_dir)
     if path.exists(args.consensus_dir):
         rmtree(args.consensus_dir)
-    if path.exists('tmp/'):
-        rmtree('tmp/')
+    if path.exists('temp/'):
+        rmtree('temp/')
 
     if args.synthetic_data_available:
         assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
-    if args.min_sequences < 20:
-        print('WARNING: min_sequences is less than 25, this is not reccomended and may cause innacurate consensus sequence determination')
+    if args.min_sequences < 15:
+        print('WARNING: min_sequences is less than 15, this is not reccomended and may cause innacurate consensus sequence determination')
 
-    makedirs(args.cluster_dir, exist_ok=True)
+    makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
+    makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
-    args.seq_limit_for_debugging = 1000 # 10000
+    args.seq_limit_for_debugging = None # 10000
 
     main(**vars(args))
 
     if not args.save_intermediate_files:
-        rmtree('tmp/')
+        rmtree('temp/')
 
 if __name__ == '__main__':
     cli()

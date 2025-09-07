@@ -10,7 +10,7 @@ from dnabarmap.utils import read_fastq, write_full_fastq, degenerate_nucleotide_
 
 
 
-def decode_alignment(sequence, reference=None, reduce=False):
+def decode_alignment(sequence, reference=None, reduce=False, extra=5):
     """Convert one-hot encoded sequence array or alignment back to nucleotide sequence."""
     sequences = []
     if reference is not None and reduce:
@@ -19,8 +19,10 @@ def decode_alignment(sequence, reference=None, reduce=False):
         mask = (~np.all(np.isnan(adj_ref), axis=-1))
 
         valid = np.where(mask)[0]
-        first_idx = valid[0]
-        last_idx = valid[-1] + 1
+        first_idx = max(0, valid[0] - extra)
+        last_idx = min(mask.shape[0], valid[-1] + extra + 1)
+        reference[first_idx:valid[0]] = 1
+        reference[valid[-1] + 1:last_idx] = 1
         reference = reference[first_idx:last_idx]
         sequence = sequence[first_idx:last_idx]
         sequences.append(reference)
@@ -103,13 +105,12 @@ def initialize_sequences(sequences, barcode_template, data,
     return best_sequences, directions
 
 
-def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False):
+def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False, extra=5):
     # Print alignment to true barcode and barcode reference
-    return
     results = []
     decoded_sequences = []
     for test_idx in indices:
-        decoded_reference, decoded_sequence = decode_alignment(best_sequences[test_idx], reference_array[test_idx], reduce=True)
+        decoded_reference, decoded_sequence = decode_alignment(best_sequences[test_idx], reference_array[test_idx], reduce=True, extra=extra)
         decoded_sequences.append(decoded_sequence)
         test_seq = data.true_barcode.to_list()[:seq_limit_for_debugging][test_idx]
 
@@ -147,9 +148,12 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
 
     return sequences, headers, data, seq_limit_for_debugging
 
-def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size, barcode_template,
+def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
           patience, synthetic_data_available, buffer,
           **kwargs):
+
+    extra = 15
+    kwargs['id'] = kwargs['id']* len(barcode_template)/(extra*2+len(barcode_template))
     # Load dataset
     assert os.path.exists(input_fn)
     if synthetic_data_available:
@@ -170,7 +174,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
         current_vals[idx:batch_size+idx] = np.nansum(result, axis=-1)
 
     if synthetic_data_available:
-        report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, range(sequence_array.shape[0]), plot=True)
+        report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, range(sequence_array.shape[0]), plot=True, extra=extra)
 
     N = sequence_array.shape[0]
     active = deque(range(N))  # all indices start “active”
@@ -253,7 +257,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
 
     passed_seqs = []
     for i in passing_idxs:
-        decoded_reference, decoded_seq = decode_alignment(sequence_array[i], reference_array[i], reduce=True)
+        decoded_reference, decoded_seq = decode_alignment(sequence_array[i], reference_array[i], reduce=True, extra=extra)
         passed_seqs.append((i, decoded_seq))
 
     if synthetic_data_available:
@@ -264,7 +268,7 @@ def align(input_fn, output_fn, filtered_fn, seq_limit_for_debugging, batch_size,
     print(np.mean(scores))
 
     # Save alignments
-    write_full_fastq(passed_seqs, directions, output_fn, input_fn, filtered_fn)
+    write_full_fastq(passed_seqs, directions, output_fn, input_fn, reoriented_fn)
 
 
 if __name__ == '__main__':
@@ -277,7 +281,7 @@ if __name__ == '__main__':
 
     # Set alignment parameters
     parser.add_argument('--batch_size', type=int, default=1024)
-    parser.add_argument('--patience', type=int, default=3,
+    parser.add_argument('--patience', type=int, default=0,
                         help='How many times to try next best suggestion before giving up')
     parser.add_argument('--buffer', type=int, default=40,
                         help='Expected constant region on the DNA fragment before the barcode')

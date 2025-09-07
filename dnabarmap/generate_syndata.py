@@ -178,18 +178,18 @@ def cli():
                         help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate sampling')
 
     # Parameters defining what syndata to generate
-    parser.add_argument('--duplication_rate', type=int, default=50,
+    parser.add_argument('--duplication_rate', type=int, default=25,
                         help='Analogous to sequencing depth')
-    parser.add_argument('--barcodes_per_variant', type=int, default=10)
+    parser.add_argument('--barcodes_per_variant', type=int, default=100)
     parser.add_argument('--num_variants', type=int, default=10)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='TATGATNNBMDVNBHDMNBVWDRBNMNDBVWNBDVWVBNRHBNMDBVHNDBVHRDBHVDNSHDNBVCTGATC',
+                        default='NKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKB',
+                        # default='CAGGGACTNKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKBATACATGC',
                         # Works TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCTGATC
                         # Doesnt work ATGCAGHNNRBHDBVWBNVDYDNVBWVNBDHSNDHSNNDYVNDVYNNDVYNDVBHSDHVBHDVNBHGCATCA
                         # Doesnt work ATGCAGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNGCATCA
-
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
@@ -202,7 +202,7 @@ def cli():
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
     parser.add_argument('--right_coding_flank', type=str, default='ATCTAGCATC',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/syndataG')
+    parser.add_argument('--fn', type=str, default='syndata/syndataB')
 
     args = parser.parse_args()
 
@@ -216,3 +216,12 @@ def cli():
 
 if __name__ == '__main__':
     cli()
+
+
+# /Users/natenovy/miniconda3_mps/envs/dnabarmap/bin/python dnabarmap/generate_barcode_template.py
+# Using NumPy (CPU) as backend
+# Generating 375 optimized barcodes
+# Full filtered:
+#  [('DNRBHNRBNWBVHBDHVBDHBVBDHVBNRHNBRHNDBVHDHBVNDHBVNRHBNDMDKHVN', (4.7634599571862895, 0.3416666666666667)), ('NHDVYNDVBHVDNBHVDHSHBWVNBVWBVHDBVHDHSDHBVHDBMHBDVYVNDBHVDNBH', (4.764088071192806, 0.3444444444444444)), ('DBNHVDSHNVWBNVWBNDVHBNDVHBDNRHSBDHNRYDNVBWRDDBHVNDBHVWNBDVHD', (4.765699972735173, 0.34722222222222227)), ('VVDBHVNKHDVBHVDBMVDBBMDNBHSDHVBNDHSDVHSNDMSHVDHBVDBHNVKVHVDB', (4.768344680534585, 0.3513888888888889)), ('NNSYDNBMBDVYNVDHYNVDNYVYDHMBDHBVDHVYDHNVBWNVHBWDMNBHDVBHRBNN', (4.769394497712066, 0.3541666666666667)), ('NVWNKVBHDNVKHNRBHVDVBHNDRBHWVBDVHSDHNKVNWNKMNBWRDNBMNDVBWVND', (4.77087160005538, 0.35833333333333334)), ('DHBBVDYSDNWBVYVDBHSDHNBRYNVKNHDVKHVNKHBVNKHBVBWNVHKBVDHKNVYN', (4.771890767674831, 0.3625)), ('NHNWSNVHDBVNYWNMBVWBHVDYNVYWHNSDHRNBHWVYHDMNBNWVNBDWVYDNRBHN', (4.773677362262467, 0.36527777777777776))]
+# Best candidate: ('DNRBHNRBNWBVHBDHVBDHBVBDHVBNRHNBRHNDBVHDHBVNDHBVNRHBNDMDKHVN', (4.7634599571862895, 0.3416666666666667))
+# Elbow candidate: ('VVDBHVNKHDVBHVDBMVDBBMDNBHSDHVBNDHSDVHSNDMSHVDHBVDBHNVKVHVDB', (4.768344680534585, 0.3513888888888889))

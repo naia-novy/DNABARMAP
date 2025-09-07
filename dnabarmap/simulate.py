@@ -5,7 +5,7 @@ import gzip
 
 def simulate_many(sequences):
     # Create a temporary FASTA file for the sequence
-    with tempfile.NamedTemporaryFile(mode='w+', suffix='.fasta', delete=False, dir='tmp') as tmp_fasta:
+    with tempfile.NamedTemporaryFile(mode='w+', suffix='.fasta', delete=False, dir='temp') as tmp_fasta:
         fasta_filename = tmp_fasta.name
         for idx, sequence in enumerate(sequences):
             # Write the sequence to the FASTA file

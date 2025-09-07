@@ -1,208 +1,160 @@
 import subprocess
-from os import makedirs, path
 from Bio import SeqIO
+from Bio.Seq import Seq
 from collections import defaultdict
+from glob import glob
 from dnabarmap.utils import import_cupy_numpy
+from Bio.SeqRecord import SeqRecord
+
 np = import_cupy_numpy()
 
 
-def run_vsearch(
-    output_fn,
-    cluster_dir,
-    threads,
-    cluster_iterations,
-    lower_cluster_id,
-    patience,
-    **kwargs):
-    makedirs(cluster_dir, exist_ok=True)
-    # Use vsearch clustering iterativly to cluster sequences by similarity
-    # Do not allow indels since this was already approximated in the alignment step
-
-    if patience > 0:
-        cluster_params = ["--cons_truncate", '--gapopen', '1000', '--gapext', '1000']
-    else:
-        cluster_params = []
-
-    input_fasta = output_fn
-    values = list(np.linspace(0.98, lower_cluster_id, cluster_iterations))
-    for i in range(cluster_iterations):
-        i_adj = i * 2
-        print(f"Running clustering iteration {i+1}")
-
-        first_out = path.join(cluster_dir, f"consensus_r{i_adj+1}.fasta")
-        second_out = path.join(cluster_dir, f"consensus_r{i_adj+2}.fasta")
-        first_uc = path.join(cluster_dir, f"clusters_r{i_adj+1}.uc")
-        second_uc = path.join(cluster_dir, f"clusters_r{i_adj+2}.uc")
-        id = values[i]
-        second_id = max(1.0, values[i])
-
-        cmd = ["vsearch", "--cluster_size", input_fasta,
-            "--id", str(id),
-            "--threads", str(threads),
-            "--consout", first_out,
-            "--uc", first_uc,
-            "--sizeout",
-            "--sizein",
-            "--clusterout_sort"] + cluster_params
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-        cmd = ["vsearch", "--cluster_size", first_out,
-            "--id", str(second_id),
-            "--threads", str(threads),
-            "--consout", second_out,
-            "--uc", second_uc,
-            "--sizeout",
-            "--sizein",
-            "--clusterout_sort"] + cluster_params
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        input_fasta = second_out
-
-    # Final mapping
-    final_uc = path.join(cluster_dir, "clustered_barcodes.uc")
-    cmd = [
-        "vsearch", "--usearch_global", input_fasta,
-        "--db", second_out,
-        "--id", str(id),
-        "--threads", str(threads),
-        "--uc", final_uc,
-        "--sizein",
-    ] + cluster_params[1:]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-# def run_vsearch(
-#     output_fn,
-#     cluster_dir,
-#     threads,
-#     cluster_iterations,
-#     lower_cluster_id,
-#     **kwargs):
-#     makedirs(cluster_dir, exist_ok=True)
-#     # Use vsearch clustering iterativly to cluster sequences by similarity
-#     # Do not allow indels since this was already approximated in the alignment step
-#
-#     input_fasta = output_fn
-#     values = list(np.linspace(0.95, lower_cluster_id, cluster_iterations))
-#     for i in range(cluster_iterations):
-#         i_adj = i * 2
-#         print(f"Running clustering iteration {i+1}")
-#
-#         first_out = path.join(cluster_dir, f"consensus_r{i_adj+1}.fasta")
-#         second_out = path.join(cluster_dir, f"consensus_r{i_adj+2}.fasta")
-#         first_uc = path.join(cluster_dir, f"clusters_r{i_adj+1}.uc")
-#         second_uc = path.join(cluster_dir, f"clusters_r{i_adj+2}.uc")
-#         id = values[i]
-#         second_id = max(0.9, values[i])
-#
-#         cmd = ["vsearch", "--cluster_size", input_fasta,
-#             "--id", str(id),
-#             "--threads", str(threads),
-#             "--consout", first_out,
-#             "--uc", first_uc,
-#             "--sizeout",
-#             "--sizein",
-#             "--clusterout_sort",
-#             "--cons_truncate",
-#             "--gapopen", "1000",
-#             "--gapext", "1000"]
-#         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-#
-#         cmd = ["vsearch", "--cluster_size", first_out,
-#             "--id", str(second_id),
-#             "--threads", str(threads),
-#             "--consout", second_out,
-#             "--uc", second_uc,
-#             "--sizeout",
-#             "--sizein",
-#             "--clusterout_sort",
-#             "--cons_truncate",
-#             "--gapopen", "1000",
-#             "--gapext", "1000"]
-#         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-#         input_fasta = second_out
-#
-#     # Final mapping
-#     final_uc = path.join(cluster_dir, "clustered_barcodes.uc")
-#     cmd = [
-#         "vsearch", "--usearch_global", input_fasta,
-#         "--db", second_out,
-#         "--id", str(id),
-#         "--threads", str(threads),
-#         "--uc", final_uc,
-#         "--sizein",
-#         "--gapopen", "1000",
-#         "--gapext", "1000",
-#     ]
-#     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-def save_full_seqs(filtered_fn, min_sequences, cluster_iterations, seq_limit_for_debugging=None, **kwargs):
-    # Using cluster information, save all full seqs for a given cluster to a file
-    if seq_limit_for_debugging is None:
-        seq_limit_for_debugging = np.inf
-    expansions = {}
-    approved_clusters = set()
-
-    cluster_iterations *= 2
-    for i in range(1, cluster_iterations+1):
-        observed = set()
-        expand = defaultdict()
-        with open(f"tmp/clusters/clusters_r{i}.uc") as uc:
-            for L in uc:
-                if L[0] not in ("S", "H"):
-                    continue
-                parts = L.strip().split("\t")
-                label, idx = parts[0], parts[-2].split(';')[0].split('=')[-1]
-                if idx in observed:
-                    continue
-
-                expanded_id = idx if label == "S" else parts[-1].split(';')[0].split('=')[-1]
-                expand[idx] = expanded_id
-                observed.add(idx)
-
-                if i == cluster_iterations:
-                    if label == 'S':
-                        size = int(parts[-2].split('=')[-1])
-                    else:
-                        size = int(parts[-1].split('=')[-1])
-
-                    if size >= min_sequences:
-                        approved_clusters.add(idx)
-
-        expansions[i] = expand
-
-    # Group full sequences for clustering
-    clustered_sequences = defaultdict(list)
-    with open(filtered_fn) as handle:
-        for seq_idx, record in enumerate(SeqIO.parse(handle, "fastq")):
-            if seq_idx >= seq_limit_for_debugging:
-                break
-            id_ = record.id
-            cluster_id = resolve_final_cluster(id_, expansions)
-            if cluster_id not in approved_clusters:
+def parse_clusters(file_path, min_sequences):
+    clusters = {}
+    current_cluster = None
+    cluster_id, last_id = None, None
+    number_passing = 0
+    with open(file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
                 continue
 
-            clustered_sequences[cluster_id].append(record)
+            # Check if it's a cluster representative (>n >n sequence)
+            if line.startswith('>'):
+                if last_id is None:  # first observation
+                    last_id = line[1:]
+                    current_cluster = last_id
+                elif last_id == line[1:]:  # cluster representative
+                    # save previous clusters
+                    if len(clusters) >= min_sequences:
+                        save_clusters_to_files(current_cluster, clusters, 'temp/clusters/barcodes/')
+                        number_passing += 1
+                    current_cluster = last_id
+                    clusters = {}  # overwrite clusters
+                last_id = line[1:]
+            else:
+                clusters['>' + last_id] = line
+        if len(clusters) >= min_sequences:
+            save_clusters_to_files(current_cluster, clusters, 'temp/clusters/barcodes/')
+            number_passing += 1
 
+        print(f'Found {number_passing} clusters with >= {min_sequences} sequences.')
+
+
+def cluster(output_fn, min_sequences, threads, id, **kwargs):
+    cluster_out = 'temp/clusters/barcodes/cluster-result_all_seqs.fasta'
+    with open(cluster_out, "w") as out_fn:
+        # Works good for 100 barcodes at 30x
+        # cmd = ['mmseqs',
+        #        'easy-linclust',
+        #        '--threads', str(threads),
+        #        '--adjust-kmer-len', '0',
+        #        '--kmer-per-seq', '5000',
+        #        '--similarity-type', '1', # 2 also works
+        #        # '--gap-open', '3',
+        #        # '--gap-extend', '1',
+        #        '--cluster-mode', '1',
+        #        '--min-seq-id', str(id),
+        #        '-k', '10',
+        #        '-c', '0.75',
+        #        '--remove-tmp-files', '1',
+        #        output_fn, 'temp/clusters/barcodes/cluster-result', 'temp']
+        cmd = ['mmseqs',
+               'easy-linclust',
+               '--threads', str(threads),
+               '--adjust-kmer-len', '0',
+               '--kmer-per-seq', '5000',
+               '--similarity-type', '1',  # 2 also works, 1 948
+               '--gap-open', '3',
+               '--gap-extend', '1',
+               '--cluster-mode', '1',
+               '--min-seq-id', str(id),
+               '-k', '12',
+               '-c', '0.5',
+               '--remove-tmp-files', '1',
+               output_fn, 'temp/clusters/barcodes/cluster-result', 'temp']
+
+        result = subprocess.run(
+            cmd,
+            stdout=out_fn,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if result.returncode != 0:
+            print(f"mmseqs failed on {out_fn}:\n{result.stderr}")
+            raise subprocess.CalledProcessError(result.returncode, cmd)
+
+    # Parse the clusters
+    parse_clusters(cluster_out, min_sequences)
+
+def save_full_seqs(reoriented_fn, **kwargs):
+    cluster_map = defaultdict(list)
+
+    clusters = glob("temp/clusters/barcodes/cluster_*.fasta")
+    for i, cluster in enumerate(clusters):
+        cluster_id = cluster.split('_')[-1].split('.')[0]
+        with open(cluster) as f:
+            for L in f.readlines():
+                if L.startswith('>'):
+                    id = L[1:].strip()
+                    cluster_map[cluster_id].append(id)
+
+    pos_index = build_position_index(reoriented_fn)
     written_clusters = 0
-    for cluster, seqs in clustered_sequences.items():
-        with open(f"tmp/clusters/cluster_{cluster}.fastq", "w") as f:
-            for seq in seqs:
+    for cluster, idxs in cluster_map.items():
+        with open(f"temp/clusters/full_seqs/cluster_{cluster}.fastq", "w") as f:
+            for idx in idxs:
+                seq = get_sequence_by_position(reoriented_fn, pos_index[idx])
                 SeqIO.write(seq, f, "fastq")
             written_clusters += 1
 
-    print(f"Wrote full sequence fastqs for {written_clusters} clusters with >= {min_sequences} sequences.")
+    print(f"Wrote {written_clusters} clusters to full seq fastq files.")
 
 
-def resolve_final_cluster(seq_id, expansion_maps):
-    # Iterate over expansions from low to high. When reading from full fasta, use index to map through expansions and
-    # determine cluster, then store in this cluster
-    current = seq_id
-    for i in range(1, len(expansion_maps) + 1):
-        if str(current) in expansion_maps[i]:
-            current = expansion_maps[i][str(current)]
-        else:
-            break  # current is the root cluster
+def build_position_index(fastq_file):
+    header_to_position = {}
+    with open(fastq_file, 'r') as f:
+        while True:
+            pos = f.tell()  # Get current file position
+            line = f.readline()
+            if not line:
+                break
 
-    return current
+            if line.startswith('@'):
+                header_id = line[1:].strip().split()[0]
+                header_to_position[header_id] = pos
+
+                # Skip the next 3 lines (sequence, +, quality)
+                f.readline()  # sequence
+                f.readline()  # +
+                f.readline()  # quality
+
+    print(f"Index complete: {len(header_to_position):,} positions stored")
+    return header_to_position
+
+
+def get_sequence_by_position(fastq_file, position):
+    with open(fastq_file, 'r') as f:
+        f.seek(position)
+        header = f.readline().strip()[1:]
+        sequence = f.readline().strip()
+        plus = f.readline().strip()
+        quality = f.readline().strip()
+
+        record = SeqRecord(
+            Seq(sequence),
+            id=header,
+            description="",
+            letter_annotations={'phred_quality': [ord(c) - 33 for c in quality]})
+        return record
+
+
+# Usage example
+def save_clusters_to_files(cluster_id, clusters, output_dir):
+    filename = f"{output_dir}/cluster_{cluster_id}.fasta"
+    with open(filename, 'w') as f:
+        for id, seq in clusters.items():
+            f.write(id + '\n')
+            f.write(seq + '\n')
 

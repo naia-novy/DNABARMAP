@@ -275,7 +275,7 @@ def read_file_in_batches(fn, batch_size=100, last_position=None):
             # Update last_position after reading
             last_position = file.tell()
 
-            temp_path = f"{fn}.tmp"  # Temporary file path
+            temp_path = f"{fn}.temp"  # Temporary file path
 
             if delete_lines and batch:
                 index = 0
@@ -290,12 +290,6 @@ def read_file_in_batches(fn, batch_size=100, last_position=None):
                                     temp_file.write(line)  # Write the sequence
                                     index += 1
                                 header = None  # Reset the header
-                        # if line[0] != '>':
-                        #     if line.strip() not in batch:
-                        #         temp_file.write(f'>s{index}\n')
-                        #         temp_file.write(line)  # Write non-deleted lines to the temp file
-                        #         index += 1
-
 
                 os.replace(temp_path, fn)
 
