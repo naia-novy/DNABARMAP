@@ -178,14 +178,18 @@ def cli():
                         help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate sampling')
 
     # Parameters defining what syndata to generate
-    parser.add_argument('--duplication_rate', type=int, default=25,
+    parser.add_argument('--duplication_rate', type=int, default=100,
                         help='Analogous to sequencing depth')
     parser.add_argument('--barcodes_per_variant', type=int, default=100)
     parser.add_argument('--num_variants', type=int, default=10)
 
     # Barcode and coding parameters
-    parser.add_argument('--barcode_template', type=str,
-                        default='NKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKB',
+    parser.add_argument('--barcode_template', type=str, #VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH
+                        # default='BNVWVKWVNRYRNKDMNNSDHDRKDWDRBRYRHRNBDMVRYDNRKHDVKNHRBDWBVDDH',
+                        # default='HNYRYRYVWYVYWMNYDVYRYNMRYVYDSNYRYRYVHDYV',
+                        default='BDVYDNSWNNKVYKNBMKNNVYKYSNKHKVKVHKNSKYVBBKMDNBMKNN',
+
+                        # default='DDVWBHVDSWBNWRDKWRWNKRHNKRWKDVDWBWRDKWRWWBVWNRBDWRWBDSDMNBND',
                         # default='CAGGGACTNKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKBATACATGC',
                         # Works TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCTGATC
                         # Doesnt work ATGCAGHNNRBHDBVWBNVDYDNVBWVNBDHSNDHSNNDYVNDVYNNDVYNDVBHSDHVBHDVNBHGCATCA

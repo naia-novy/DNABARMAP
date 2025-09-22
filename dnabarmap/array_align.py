@@ -56,7 +56,7 @@ def decode_alignment(sequence, reference=None, reduce=False, extra=5):
 def initialize_sequences(sequences, barcode_template, data,
                          synthetic_data_available, seq_limit_for_debugging, buffer, batch_size, **kwargs):
     # Convert sequences to arrays and do initial approximate alignment
-    buffer = int(buffer * 0.75)
+    buffer = max(buffer - 30, 0)
     length_mult = 3
     template_len = len(barcode_template)
     template_len = int(template_len * length_mult)
@@ -149,7 +149,7 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
     return sequences, headers, data, seq_limit_for_debugging
 
 def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
-          patience, synthetic_data_available, buffer,
+          synthetic_data_available, buffer,
           **kwargs):
 
     extra = 15
@@ -166,80 +166,6 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
     reference_array = reference_to_array(barcode_template, sequence_array.shape[1])
     reference_array = np.repeat(reference_array[np.newaxis], len(sequence_array), axis=0)
     reference_array = np.transpose(reference_array[:, :, 0], (0, 2, 1))
-
-    # Generate initial scores
-    current_vals = np.zeros(sequence_array.shape[0])
-    for idx in range(0, sequence_array.shape[0], batch_size):
-        result = score_sequences(sequence_array[idx:batch_size+idx], reference_array[idx:batch_size+idx])
-        current_vals[idx:batch_size+idx] = np.nansum(result, axis=-1)
-
-    if synthetic_data_available:
-        report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, range(sequence_array.shape[0]), plot=True, extra=extra)
-
-    N = sequence_array.shape[0]
-    active = deque(range(N))  # all indices start “active”
-    patience_counter = np.zeros(N, dtype=np.int32)
-
-    # Pre allocate batch buffer for efficency
-    Bmax = batch_size
-    seq_shape = sequence_array.shape[1:]  # e.g. (seq_len, dim)
-    batch_seqs_buf = np.empty((Bmax, *seq_shape), dtype=sequence_array.dtype)
-    batch_refs_buf = np.empty((Bmax, *reference_array.shape[1:]), dtype=reference_array.dtype)
-
-    if patience == 0:
-        active = False
-    while active:
-        B = min(len(active), batch_size)
-        batch_idxs = [int(active.popleft()) for _ in range(B)]
-        batch_idxs = np.array(batch_idxs, dtype=np.int32)
-
-
-        patience_counter[batch_idxs] += 1
-        b = len(batch_idxs)  # actual batch size this iteration
-        np.take(sequence_array, batch_idxs, axis=0, out=batch_seqs_buf[:b])
-        np.take(reference_array, batch_idxs, axis=0, out=batch_refs_buf[:b])
-
-        batch_patience = patience_counter[batch_idxs]
-
-        valid_indices = ~np.isnan(batch_refs_buf[:b]).any(axis=-1)  # (b, seq_len)
-        valid_bound = np.concatenate([
-            valid_indices,
-            np.zeros((b, 1), dtype=bool)  # allow end boundary
-        ], axis=1)  # shape: (b, seq_len + 1)
-
-        suggestions = find_suggestions(batch_seqs_buf[:b].copy(), batch_refs_buf[:b].copy(), batch_patience, valid_bound)
-        aligned_sequences, aligned_references = apply_alignment_vectorized(batch_seqs_buf[:b], batch_refs_buf[:b], suggestions, target_len=sequence_array.shape[1])
-        scores = score_sequences(aligned_sequences, aligned_references)
-
-        scores = np.nansum(scores, axis=-1)
-        # Concatenate sequences along "attempt" dimension, determine best attempt to use based on weighted score
-        best_attempt = np.argmax(scores, axis=0)  # shape: (B,)
-
-        # Extract the best attempt per batch item
-        batch_indices = np.arange(aligned_sequences.shape[1])
-        best_seq = aligned_sequences[best_attempt, batch_indices]
-        best_ref = aligned_references[best_attempt, batch_indices]
-        best_unweighted = scores[best_attempt, batch_indices]
-
-        # Accept improved alignments
-        accept_mask = current_vals[batch_idxs] < best_unweighted
-        if np.any(accept_mask):
-            accepted_batch_idxs = batch_idxs[accept_mask]
-            local_accept_indices = np.where(accept_mask)[0]
-            sequence_array[accepted_batch_idxs] = best_seq[local_accept_indices]
-            reference_array[accepted_batch_idxs] = best_ref[local_accept_indices]
-            current_vals[accepted_batch_idxs] = best_unweighted[local_accept_indices]
-
-            if synthetic_data_available:
-                report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, [accepted_batch_idxs[0]])
-
-        # Update available indices
-        for idx, improved in zip(batch_idxs, accept_mask):
-            if improved:
-                patience_counter[idx] = 0
-                active.append(idx)
-            elif patience_counter[idx] < patience:
-                active.append(idx)
 
     # Convert arrays into nucleotide sequences for downstream processing
     scores = []
@@ -263,9 +189,6 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
     if synthetic_data_available:
         print('\nFinal alignment results:')
         report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, range(sequence_array.shape[0]), plot=True)
-
-    print(np.median(scores))
-    print(np.mean(scores))
 
     # Save alignments
     write_full_fastq(passed_seqs, directions, output_fn, input_fn, reoriented_fn)

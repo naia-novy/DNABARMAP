@@ -4,7 +4,7 @@ true = pd.read_csv('/Users/natenovy/Research/DNABARMAP/syndata/syndataB_mapping_
 gen = pd.read_csv('/Users/natenovy/Research/DNABARMAP/DNABARMAP_outputs/syndataB_mapping.tsv', sep='\t')
 
 
-left_flank = 5
+left_flank = 0
 right_flank = 0
 
 correct = 0

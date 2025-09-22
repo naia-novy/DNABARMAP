@@ -70,8 +70,8 @@ def cluster(output_fn, min_sequences, threads, id, **kwargs):
                '--gap-extend', '1',
                '--cluster-mode', '1',
                '--min-seq-id', str(id),
-               '-k', '12',
-               '-c', '0.5',
+               '-k', '15',
+               '-c', '0.75',
                '--remove-tmp-files', '1',
                output_fn, 'temp/clusters/barcodes/cluster-result', 'temp']
 

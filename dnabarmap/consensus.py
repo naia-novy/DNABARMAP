@@ -26,9 +26,9 @@ def determine_consensus(threads, **kwargs):
         with open(draft_path, "w") as out_fn:
             cmd = ['abpoa',
                    '-m 1',
-                   # '-O 4,6',
-                   # '-E 1,1',
-                   # '-Q',
+                   '-O 4,4',
+                   '-E 2,2',
+                   '-Q',
                    '-i',
                    '-s',
                    '-r 5',

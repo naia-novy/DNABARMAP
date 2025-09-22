@@ -63,7 +63,7 @@ def cli():
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='NKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKB',
+                        default='BDVYDNSWNNKVYKNBMKNNVYKYSNKHKVKVHKNSKYVBBKMDNBMKNN',
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='CTATCGT',
                         help="Left constant sequence of coding region")
@@ -72,17 +72,15 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--patience', type=int, default=0,
-                        help='How many times to try next best suggestion before giving up during alignment')
-    parser.add_argument('--buffer', type=int, default=30,
+    parser.add_argument('--buffer', type=int, default=60,
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
 
     parser.add_argument("--id", type=float, default=0.8, help="Value between 0 and 1 for "
                                                                            "minimum identify between barcodes for clustering."
-                                                                           "Reccomended >0.7, but can be reduced for small "
+                                                                           "Reccomended >0.75, but can be reduced for small "
                                                                             "libraries or extra long barcodes")
-    parser.add_argument("--min_sequences", type=int, default=15,
+    parser.add_argument("--min_sequences", type=int, default=20,
                         help="Minimum num_sequences for cluster to be valid >=")
     parser.add_argument("--threads", type=int, default=16,
                         help="Number of threads for clustering")
