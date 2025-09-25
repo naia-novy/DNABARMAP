@@ -10,23 +10,30 @@ from dnabarmap.map import determine_mapping
 
 
 def main(**kwargs):
+    extra = 10
+    c = 0.75
+
     initial_time = time.time()
     kwargs['input_fn'] = kwargs['fastq_fn']
     kwargs['fastq_fn'] = kwargs['input_fn'].replace('.pkl', '.fastq') # in case synthetic data
     barcode_out = 'temp/'+kwargs['input_fn'].split('/')[-1].split('.')[0] + '_barcodes.fasta'
     kwargs['output_fn'] = barcode_out
     kwargs['reoriented_fn'] = kwargs['fastq_fn'].replace('.fastq', '_reoriented.fastq')
+    kwargs['id'] = round(kwargs['id'] * len(kwargs['barcode_template'])/(extra*2+len(kwargs['barcode_template'])), 2)
+    kwargs['c'] = round(c, 2)
+    # kwargs['c'] = round(c * len(kwargs['barcode_template'])/(extra*2+len(kwargs['barcode_template'])), 2)
 
     # Extract and align barcodes using approximate alignment to degenerate reference
     print('Aligning barcodes...')
     align_start_time = time.time()
-    align(**kwargs)
+    align(extra=extra, **kwargs)
     align_time = time.time() - align_start_time
     print(f'Finished aligning and extracting barcodes in {round(align_time / 60, 1)} minutes\n')
 
     # Cluster aligned barcodes using vsearch
     print('Clustering barcodes...')
     cluster_start_time = time.time()
+    # c = min(round(0.5*((len(kwargs['barcode_template'])+extra*2)/len(kwargs['barcode_template'])), 2), 0.95)
     cluster(**kwargs)
     save_full_seqs(**kwargs)
     cluster_time = time.time() - cluster_start_time
@@ -63,11 +70,11 @@ def cli():
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='BDVYDNSWNNKVYKNBMKNNVYKYSNKHKVKVHKNSKYVBBKMDNBMKNN',
+                        default='VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH',
                         help='Degenerate reference for conducting approximate alignment of sequences')
-    parser.add_argument("--left_coding_flank", default='CTATCGT',
+    parser.add_argument("--left_coding_flank", default='TATCGT',
                         help="Left constant sequence of coding region")
-    parser.add_argument("--right_coding_flank", default='ATCTAGC',
+    parser.add_argument("--right_coding_flank", default='ATCTAG',
                         help="Right constant sequence of coding region")
 
     # Alignment parameters
@@ -76,13 +83,14 @@ def cli():
                         help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
 
-    parser.add_argument("--id", type=float, default=0.8, help="Value between 0 and 1 for "
+    parser.add_argument("--id", type=float, default=0.75, help="Value between 0 and 1 for "
                                                                            "minimum identify between barcodes for clustering."
                                                                            "Reccomended >0.75, but can be reduced for small "
                                                                             "libraries or extra long barcodes")
     parser.add_argument("--min_sequences", type=int, default=20,
-                        help="Minimum num_sequences for cluster to be valid >=")
-    parser.add_argument("--threads", type=int, default=16,
+                        help="Minimum num_sequences for cluster to be valid >= /"
+                             "aim for at least 3x the expected depth")
+    parser.add_argument("--threads", type=int, default=8,
                         help="Number of threads for clustering")
 
     parser.add_argument("--save_intermediate_files", default=True, action='store_true',
@@ -126,8 +134,8 @@ def cli():
 
     if args.synthetic_data_available:
         assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
-    if args.min_sequences < 15:
-        print('WARNING: min_sequences is less than 15, this is not reccomended and may cause innacurate consensus sequence determination')
+    if args.min_sequences < 20:
+        print('WARNING: min_sequences is less than 20, this is not reccomended and may cause innacurate consensus sequence determination')
 
     makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
     makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)

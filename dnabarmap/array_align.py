@@ -66,7 +66,6 @@ def initialize_sequences(sequences, barcode_template, data,
     sequences_A = [i[buffer:buffer + template_len] for i in sequences]
     sequences_B = [reverse_complement(i)[buffer:buffer + template_len] for i in sequences]
 
-
     reference_array = reference_to_array(barcode_template, max_len)
     seq_A_array = sequences_to_array(sequences_A, reference_array.shape[-1])
     seq_B_array = sequences_to_array(sequences_B, reference_array.shape[-1])
@@ -149,11 +148,9 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
     return sequences, headers, data, seq_limit_for_debugging
 
 def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
-          synthetic_data_available, buffer,
+          synthetic_data_available, buffer, extra,
           **kwargs):
 
-    extra = 15
-    kwargs['id'] = kwargs['id']* len(barcode_template)/(extra*2+len(barcode_template))
     # Load dataset
     assert os.path.exists(input_fn)
     if synthetic_data_available:

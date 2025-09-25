@@ -42,37 +42,22 @@ def parse_clusters(file_path, min_sequences):
         print(f'Found {number_passing} clusters with >= {min_sequences} sequences.')
 
 
-def cluster(output_fn, min_sequences, threads, id, **kwargs):
+def cluster(output_fn, min_sequences, threads, id, c, **kwargs):
     cluster_out = 'temp/clusters/barcodes/cluster-result_all_seqs.fasta'
     with open(cluster_out, "w") as out_fn:
-        # Works good for 100 barcodes at 30x
-        # cmd = ['mmseqs',
-        #        'easy-linclust',
-        #        '--threads', str(threads),
-        #        '--adjust-kmer-len', '0',
-        #        '--kmer-per-seq', '5000',
-        #        '--similarity-type', '1', # 2 also works
-        #        # '--gap-open', '3',
-        #        # '--gap-extend', '1',
-        #        '--cluster-mode', '1',
-        #        '--min-seq-id', str(id),
-        #        '-k', '10',
-        #        '-c', '0.75',
-        #        '--remove-tmp-files', '1',
-        #        output_fn, 'temp/clusters/barcodes/cluster-result', 'temp']
         cmd = ['mmseqs',
-               'easy-linclust',
+               'easy-cluster',
                '--threads', str(threads),
-               '--adjust-kmer-len', '0',
-               '--kmer-per-seq', '5000',
-               '--similarity-type', '1',  # 2 also works, 1 948
-               '--gap-open', '3',
-               '--gap-extend', '1',
+               '--kmer-per-seq', '1000',
+               '--cluster-steps', '5',
+               '--max-iterations', '1000',
+               '--alignment-mode', '3',
                '--cluster-mode', '1',
                '--min-seq-id', str(id),
-               '-k', '15',
-               '-c', '0.75',
-               '--remove-tmp-files', '1',
+               '-c', str(c),
+               '-k', '3',
+               '--similarity-type', '1',
+               '--remove-tmp-files', '0',
                output_fn, 'temp/clusters/barcodes/cluster-result', 'temp']
 
         result = subprocess.run(

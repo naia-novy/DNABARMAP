@@ -90,7 +90,7 @@ def compute_adjacency_score(seqs, refs, max_run):
 
 def find_best_rolls_batch(seqs, refs):
     # Parameters
-    max_shift = min(50, seqs.shape[2] // 2)
+    max_shift = min(60, seqs.shape[2] // 2)
     provided_range = np.arange(-max_shift, max_shift + 1)
     n_rolls = len(provided_range)
     n_strands, n_seqs, seq_len, seq_dim = seqs.shape
@@ -109,11 +109,11 @@ def find_best_rolls_batch(seqs, refs):
     top_arrays = adjacency_score[direction, :, np.arange(direction.shape[0])]
     if hasattr(top_arrays, "get"):  # CuPy array
         arr = top_arrays.get()  # move to NumPy
-        smoothed = gaussian_filter1d(arr, axis=-1, sigma=1)
+        smoothed = gaussian_filter1d(arr, axis=-1, sigma=5)
         smoothed = np.asarray(smoothed) # send back to CuPy
     else:
         # Run with numpy only
-        smoothed = gaussian_filter1d(top_arrays, axis=-1, sigma=1)
+        smoothed = gaussian_filter1d(top_arrays, axis=-1, sigma=5)
 
     best_rolls_idx = np.argmax(smoothed, axis=-1)
     best_rolls = provided_range[best_rolls_idx]  # shape: (2, n_seqs)

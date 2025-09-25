@@ -170,25 +170,25 @@ def cli():
     # Parameters if generating new barcode
     parser.add_argument('--barcode_len', type=int, default=60,
                         help='Length of barcode when generating')
-    parser.add_argument('--max_homopolymer_len', type=int, default=3,
+    parser.add_argument('--max_homopolymer_len', type=int, default=4,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--attempt_n_barcodes', type=int, default=1000,
+    parser.add_argument('--attempt_n_barcodes', type=int, default=2000,
                         help='Number of attempts to generate barcode template')
     parser.add_argument('--motif', type=str, default=None,
                         help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate sampling')
 
     # Parameters defining what syndata to generate
-    parser.add_argument('--duplication_rate', type=int, default=100,
+    parser.add_argument('--duplication_rate', type=int, default=200,
                         help='Analogous to sequencing depth')
-    parser.add_argument('--barcodes_per_variant', type=int, default=100)
+    parser.add_argument('--barcodes_per_variant', type=int, default=10)
     parser.add_argument('--num_variants', type=int, default=10)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str, #VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH
-                        # default='BNVWVKWVNRYRNKDMNNSDHDRKDWDRBRYRHRNBDMVRYDNRKHDVKNHRBDWBVDDH',
+                        default='VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH',
                         # default='HNYRYRYVWYVYWMNYDVYRYNMRYVYDSNYRYRYVHDYV',
-                        default='BDVYDNSWNNKVYKNBMKNNVYKYSNKHKVKVHKNSKYVBBKMDNBMKNN',
-
+                        # default='BDVYDNSWNNKVYKNBMKNNVYKYSNKHKVKVHKNSKYVBBKMDNBMKNN',
+                        # default='BVNWMBDBHVDYHNMDYNHVDBHNMDBHHSDYDHVKVNHDBMKNHHSWNBNMDYVHDVBHHWVBMDBVNH',
                         # default='DDVWBHVDSWBNWRDKWRWNKRHNKRWKDVDWBWRDKWRWWBVWNRBDWRWBDSDMNBND',
                         # default='CAGGGACTNKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKBATACATGC',
                         # Works TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCTGATC

@@ -208,17 +208,17 @@ def cli():
     parser = argparse.ArgumentParser()
 
     # Parameters if generating new barcode
-    parser.add_argument('--barcode_len', type=int, default=70,
+    parser.add_argument('--barcode_len', type=int, default=75,
                         help='Length of barcode when generating')
     parser.add_argument('--max_homopolymer_len', type=int, default=4,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--iterations', type=int, default=5000,
+    parser.add_argument('--iterations', type=int, default=500,
                         help='Simulated annealing iterations for each barcode template')
     # parser.add_argument('--ks', type=int, default=[2,3,4,5,6,7,8,9,10], nargs='+',
-    parser.add_argument('--ks', type=int, default=[1,2,3,4,5,6,7,8,9,10], nargs='+',
+    parser.add_argument('--ks', type=int, default=[2,3,4,5,6,7,8,9,10], nargs='+',
 
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--initial_designs', type=int, default=400,
+    parser.add_argument('--initial_designs', type=int, default=1000,
                         help='How many times to try optimizing different barcode templates')
     parser.add_argument('--opt_frac', type=float, default=0.5,
                         help='How many times to try optimizing different barcode templates')
