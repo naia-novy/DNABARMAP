@@ -7,7 +7,7 @@ env:
     conda run -n dnabarmap pip install -e .
     conda install -n dnabarmap -y -c conda-forge libgcc-ng=12
 	conda install -n dnabarmap -y -c conda-forge -c bioconda pbsim3 mmseqs2 racon minimap2
-    conda install -n dnabarmap -y -c conda-forge cupy cudatoolkit
+	conda install -n dnabarmap -y -c conda-forge cupy cudatoolkit
 
 # Remove the environment
 clean:
