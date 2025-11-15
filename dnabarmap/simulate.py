@@ -3,7 +3,10 @@ import tempfile
 from os import remove, makedirs
 import gzip
 
+from pathlib import Path
+
 def simulate_many(sequences):
+    makedirs('temp', exist_ok=True)
     # Create a temporary FASTA file for the sequence
     with tempfile.NamedTemporaryFile(mode='w+', suffix='.fasta', delete=False, dir='temp') as tmp_fasta:
         fasta_filename = tmp_fasta.name
@@ -12,12 +15,15 @@ def simulate_many(sequences):
             tmp_fasta.write(f">{idx}\n")
             tmp_fasta.write(f"{sequence}\n")
 
+    HERE = Path(__file__).resolve().parent
+    model_file = HERE / "pbsim3_models" / "QSHMM-ONT-HQ.model"
+
     prefix = fasta_filename.replace('.fasta', '')
     pbsim_command = [
         'pbsim',
         '--strategy', 'templ',
         '--method', 'qshmm',
-        '--qshmm', 'pbsim3_models/QSHMM-ONT-HQ.model',
+        '--qshmm', model_file,
         '--template', fasta_filename,
         '--prefix', prefix,
         '--depth', '1'

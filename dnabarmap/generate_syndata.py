@@ -210,7 +210,8 @@ def cli():
 
     args = parser.parse_args()
 
-    makedirs('/'.join(args.fn.split('/')[:-1]), exist_ok=True)
+    dirs = '/'.join(args.fn.split('/')[:-1]) if '/'.join(args.fn.split('/')[:-1]) != '' else './'
+    makedirs(dirs, exist_ok=True)
     if args.barcode_template is None:
         # Generating new barcode based on motif
         assert args.motif is not None
