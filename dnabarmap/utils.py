@@ -2,6 +2,7 @@ import pandas as pd
 import os
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+import gzip
 
 def import_cupy_numpy(print_note=False):
     gpu_available = False
@@ -232,7 +233,29 @@ def read_fastq(filename, seq_limit=None):
 
     return sequences, headers
 
+def read_fastqgz(filename, seq_limit=None):
+    headers = []
+    sequences = []
+    i = 0
 
+    # Use gzip.open for .gz files, in text mode
+    with gzip.open(filename, "rt") as f:
+        while True:
+            header = f.readline()
+            if not header:
+                break  # EOF
+            seq = f.readline().strip()
+            plus = f.readline()
+            qual = f.readline().strip()
+
+            headers.append(header[1:].strip())  # remove '@'
+            sequences.append(seq)
+
+            i += 1
+            if seq_limit is not None and i >= seq_limit:
+                break
+
+    return sequences, headers
 def convert_AA_to_nucleotide(aa_seq_list):
     codon_usage = pd.read_csv('ecoli_codon_usage.csv')
 

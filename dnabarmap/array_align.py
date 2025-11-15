@@ -6,7 +6,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from dnabarmap.align_actions import *
-from dnabarmap.utils import read_fastq, write_full_fastq, degenerate_nucleotide_mapping, reverse_complement
+from dnabarmap.utils import read_fastq, read_fastqgz, write_full_fastq, degenerate_nucleotide_mapping, reverse_complement
 
 
 
@@ -129,6 +129,9 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
     # Load data according to the filetype provided
     if input_fn.endswith('.fastq'):
         sequences, headers = read_fastq(input_fn, seq_limit_for_debugging)
+        data = None
+    elif input_fn.endswith('.fastq.gz'):
+        sequences, headers = read_fastqgz(input_fn, seq_limit_for_debugging)
         data = None
     elif input_fn.endswith('.pkl'):
         data = pd.read_pickle(input_fn)

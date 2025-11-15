@@ -1,8 +1,7 @@
 import subprocess
 import tempfile
-from os import remove, makedirs
+from os import remove, makedirs, environ
 import gzip
-
 from pathlib import Path
 
 def simulate_many(sequences):
@@ -15,8 +14,8 @@ def simulate_many(sequences):
             tmp_fasta.write(f">{idx}\n")
             tmp_fasta.write(f"{sequence}\n")
 
-    HERE = Path(__file__).resolve().parent
-    model_file = HERE / "pbsim3_models" / "QSHMM-ONT-HQ.model"
+    model_dir = Path(environ.get("PBSIM_MODELS", "/default/path"))
+    model_file = model_dir / "QSHMM-ONT-HQ.model"
 
     prefix = fasta_filename.replace('.fasta', '')
     pbsim_command = [
