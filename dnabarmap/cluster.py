@@ -82,15 +82,17 @@ def save_full_seqs(reoriented_fn, **kwargs):
         with open(cluster) as f:
             for L in f.readlines():
                 if L.startswith('>'):
-                    id = L[1:].strip()
+                    id = L[1:].strip().split()[0]
                     cluster_map[cluster_id].append(id)
 
+
     pos_index = build_position_index(reoriented_fn)
+
     written_clusters = 0
     for cluster, idxs in cluster_map.items():
         with open(f"temp/clusters/full_seqs/cluster_{cluster}.fastq", "w") as f:
             for idx in idxs:
-                seq = get_sequence_by_position(reoriented_fn, pos_index[idx])
+                seq = get_sequence_by_position(reoriented_fn, pos_index[int(idx)])
                 SeqIO.write(seq, f, "fastq")
             written_clusters += 1
 
@@ -99,21 +101,24 @@ def save_full_seqs(reoriented_fn, **kwargs):
 
 def build_position_index(fastq_file):
     header_to_position = {}
+    pos = 0
     with open(fastq_file, 'r') as f:
         while True:
-            pos = f.tell()  # Get current file position
+            char_pos = f.tell()  # Get current file position
             line = f.readline()
             if not line:
                 break
 
             if line.startswith('@'):
+
                 header_id = line[1:].strip().split()[0]
-                header_to_position[header_id] = pos
+                header_to_position[pos] = char_pos
 
                 # Skip the next 3 lines (sequence, +, quality)
                 f.readline()  # sequence
                 f.readline()  # +
                 f.readline()  # quality
+                pos += 1
 
     print(f"Index complete: {len(header_to_position):,} positions stored")
     return header_to_position

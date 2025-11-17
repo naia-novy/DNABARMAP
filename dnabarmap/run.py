@@ -33,7 +33,6 @@ def main(**kwargs):
     # Cluster aligned barcodes using vsearch
     print('Clustering barcodes...')
     cluster_start_time = time.time()
-    # c = min(round(0.5*((len(kwargs['barcode_template'])+extra*2)/len(kwargs['barcode_template'])), 2), 0.95)
     cluster(**kwargs)
     save_full_seqs(**kwargs)
     cluster_time = time.time() - cluster_start_time
@@ -134,8 +133,8 @@ def cli():
 
     if args.synthetic_data_available:
         assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
-    if args.min_sequences < 20:
-        print('WARNING: min_sequences is less than 20, this is not reccomended and may cause innacurate consensus sequence determination')
+    if args.min_sequences < 15:
+        print('WARNING: min_sequences is less than 15, this is not recommended and may cause inaccurate consensus sequence determination')
 
     makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
     makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)

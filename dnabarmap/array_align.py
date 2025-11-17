@@ -194,12 +194,12 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
     write_full_fastq(passed_seqs, directions, output_fn, input_fn, reoriented_fn)
 
 
-if __name__ == '__main__':
+def cli():
     parser = argparse.ArgumentParser()
     # Set debugging/optimization parameters
     parser.add_argument('--seq_limit_for_debugging', type=int, default=None,
                         help='Filter dataset to subset for debugging')
-    parser.add_argument('--synthetic_data_available', default=True, action='store_true',
+    parser.add_argument('--synthetic_data_available', default=False, action='store_true',
                         help='Compare alignments to synthetic data or true values')
 
     # Set alignment parameters
@@ -211,7 +211,8 @@ if __name__ == '__main__':
     parser.add_argument('--barcode_template', type=str,
                         default='YHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVR', # TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCGATC
                                            help='Reference degenerate barcode to align sequences to')
-    parser.add_argument('--input_fn', type=str, default='./syndata/syndataA.pkl')
+    parser.add_argument('--input_fn', type=str, default=None)
+    parser.add_argument('--fastq_fn', type=str, default=None)
 
     args = parser.parse_args()
 
@@ -223,10 +224,12 @@ if __name__ == '__main__':
         pr = cProfile.Profile()
         pr.enable()
 
+    args.input_fn = args.fastq_fn if args.input_fn is None else args.input_fn
 
     args.output_fn = args.input_fn.replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
     args.filtered_fn = args.output_fn.replace('barcodes.fasta', 'filtered.fastq')
-
+    args.reoriented_fn= args.fastq_fn.replace('.fastq', '_reoriented.fastq')
+    args.extra = 10
     # Run alignment
     align(**vars(args))
 
@@ -237,3 +240,6 @@ if __name__ == '__main__':
         ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
         ps.print_stats(50)
         print(s.getvalue())
+
+if __name__ == '__main__':
+    cli()
