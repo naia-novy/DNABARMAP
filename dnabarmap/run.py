@@ -100,7 +100,9 @@ def cli():
     args = parser.parse_args()
 
     # Set up directories and filenames
-    args.output_dir = 'temp/'
+    args.barcode_directory = 'barcode_' + args.input_fn.split('/barcode')[-1].split('/')[0].split('_')[0]
+    args.barcode_directory = 'sample' if args.barcode_directory is None else args.barcode_directory
+    args.output_dir = f'temp/{args.barcode_directory}/'
     args.cluster_dir = args.output_dir + '/clusters/'
     args.consensus_dir = args.output_dir + '/consensus/'
 
@@ -128,8 +130,8 @@ def cli():
         rmtree(args.cluster_dir)
     if path.exists(args.consensus_dir):
         rmtree(args.consensus_dir)
-    if path.exists('temp/'):
-        rmtree('temp/')
+    if path.exists(args.output_dir):
+        rmtree(args.output_dir)
 
     if args.synthetic_data_available:
         assert args.fastq_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'

@@ -42,8 +42,8 @@ def parse_clusters(file_path, min_sequences):
         print(f'Found {number_passing} clusters with >= {min_sequences} sequences.')
 
 
-def cluster(output_fn, min_sequences, threads, id, c, **kwargs):
-    cluster_out = 'temp/clusters/barcodes/cluster-result_all_seqs.fasta'
+def cluster(output_fn, min_sequences, threads, id, c, barcode_directory, **kwargs):
+    cluster_out = f'temp/{barcode_directory}/clusters/barcodes/cluster-result_all_seqs.fasta'
     with open(cluster_out, "w") as out_fn:
         cmd = ['mmseqs',
                'easy-cluster',
@@ -58,7 +58,7 @@ def cluster(output_fn, min_sequences, threads, id, c, **kwargs):
                '-k', '3',
                '--similarity-type', '1',
                '--remove-tmp-files', '0',
-               output_fn, 'temp/clusters/barcodes/cluster-result', 'temp']
+               output_fn, f'temp/{barcode_directory}/clusters/barcodes/cluster-result', 'temp']
 
         result = subprocess.run(
             cmd,
@@ -73,10 +73,10 @@ def cluster(output_fn, min_sequences, threads, id, c, **kwargs):
     # Parse the clusters
     parse_clusters(cluster_out, min_sequences)
 
-def save_full_seqs(reoriented_fn, **kwargs):
+def save_full_seqs(reoriented_fn, barcode_directory, **kwargs):
     cluster_map = defaultdict(list)
 
-    clusters = glob("temp/clusters/barcodes/cluster_*.fasta")
+    clusters = glob(f"temp/{barcode_directory}/clusters/barcodes/cluster_*.fasta")
     for i, cluster in enumerate(clusters):
         cluster_id = cluster.split('_')[-1].split('.')[0]
         with open(cluster) as f:
@@ -90,7 +90,7 @@ def save_full_seqs(reoriented_fn, **kwargs):
 
     written_clusters = 0
     for cluster, idxs in cluster_map.items():
-        with open(f"temp/clusters/full_seqs/cluster_{cluster}.fastq", "w") as f:
+        with open(f"temp/{barcode_directory}/clusters/full_seqs/cluster_{cluster}.fastq", "w") as f:
             for idx in idxs:
                 seq = get_sequence_by_position(reoriented_fn, pos_index[int(idx)])
                 SeqIO.write(seq, f, "fastq")
