@@ -9,7 +9,7 @@ from Bio.SeqRecord import SeqRecord
 np = import_cupy_numpy()
 
 
-def parse_clusters(file_path, min_sequences):
+def parse_clusters(file_path, min_sequences, barcode_directory):
     clusters = {}
     current_cluster = None
     cluster_id, last_id = None, None
@@ -28,7 +28,7 @@ def parse_clusters(file_path, min_sequences):
                 elif last_id == line[1:]:  # cluster representative
                     # save previous clusters
                     if len(clusters) >= min_sequences:
-                        save_clusters_to_files(current_cluster, clusters, 'temp/clusters/barcodes/')
+                        save_clusters_to_files(current_cluster, clusters, f'temp/{barcode_directory}/clusters/barcodes/')
                         number_passing += 1
                     current_cluster = last_id
                     clusters = {}  # overwrite clusters
@@ -36,7 +36,7 @@ def parse_clusters(file_path, min_sequences):
             else:
                 clusters['>' + last_id] = line
         if len(clusters) >= min_sequences:
-            save_clusters_to_files(current_cluster, clusters, 'temp/clusters/barcodes/')
+            save_clusters_to_files(current_cluster, clusters, f'temp/{barcode_directory}/clusters/barcodes/')
             number_passing += 1
 
         print(f'Found {number_passing} clusters with >= {min_sequences} sequences.')
@@ -71,7 +71,7 @@ def cluster(output_fn, min_sequences, threads, id, c, barcode_directory, **kwarg
             raise subprocess.CalledProcessError(result.returncode, cmd)
 
     # Parse the clusters
-    parse_clusters(cluster_out, min_sequences)
+    parse_clusters(cluster_out, min_sequences, barcode_directory)
 
 def save_full_seqs(reoriented_fn, barcode_directory, **kwargs):
     cluster_map = defaultdict(list)
