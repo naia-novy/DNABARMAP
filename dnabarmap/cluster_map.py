@@ -10,12 +10,13 @@ from dnabarmap.map import determine_mapping
 
 
 def main(**kwargs):
-    extra = 10
-    c = 0.75
+    extra = 15
+    c = 1.0
 
     initial_time = time.time()
     kwargs['output_fn'] = kwargs['input_fn']
-    kwargs['id'] = round(kwargs['id'] * len(kwargs['barcode_template'])/(extra*2+len(kwargs['barcode_template'])), 2)
+    # kwargs['id'] = round(kwargs['id'] * len(kwargs['barcode_template'])/(extra*2+len(kwargs['barcode_template'])), 2)
+    # kwargs['c'] = round(kwargs['id'], 2)
     kwargs['c'] = round(c, 2)
 
     # Cluster aligned barcodes using vsearch
@@ -91,7 +92,7 @@ def cli():
     # Set up directories and filenames
 
     args.barcode_directory = 'barcode_' + args.input_fn.split('/barcode')[-1].split('/')[0].split('_')[0]
-    args.barcode_directory = 'sample' if args.barcode_directory is None else args.barcode_directory
+    args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
     args.output_dir = f'temp/{args.barcode_directory}/'
     args.cluster_dir = args.output_dir + '/clusters/'
     args.consensus_dir = args.output_dir + '/consensus/'

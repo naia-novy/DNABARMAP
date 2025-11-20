@@ -15,12 +15,13 @@ def determine_consensus(threads, barcode_directory, **kwargs):
     for i, fn in enumerate(clusters):
         if i % 100 == 0:
             sub_dir = f"temp/{barcode_directory}/consensus/consensus_{i}"
-            makedirs(sub_dir, exist_ok=True)
+            makedirs(sub_dir+'/draft', exist_ok=True)
+
             if i != 0:
                 print(f"Consensus sequence generated for {i} clusters")
         cluster_id = fn.split('_')[-1].split('.')[0]
-        draft_path = f"temp/{barcode_directory}/consensus/draft/cluster_{cluster_id}_consensus.fastq"
-        draft_paf = f"temp/{barcode_directory}/consensus/draft/cluster_{cluster_id}_consensus.paf"
+        draft_path = f"{sub_dir}/draft/cluster_{cluster_id}_consensus.fastq"
+        draft_paf = f"{sub_dir}/draft/cluster_{cluster_id}_consensus.paf"
         consensus_path = f"{sub_dir}/cluster_{cluster_id}_consensus.fasta"
 
         with open(draft_path, "w") as out_fn:
@@ -59,7 +60,7 @@ def determine_consensus(threads, barcode_directory, **kwargs):
                    draft_paf,
                    draft_path,
                    '--no-trimming',
-                   '-q 10',
+                   '-q 5',
                    '-w 2000', # perform poa on majority/all sequence length since they are already clustered
                    '-t', str(threads)]
             subprocess.run(cmd, stdout=out_cons, stderr=subprocess.DEVNULL, check=True)

@@ -41,6 +41,38 @@ def parse_clusters(file_path, min_sequences, barcode_directory):
 
         print(f'Found {number_passing} clusters with >= {min_sequences} sequences.')
 
+# def cluster(output_fn, min_sequences, threads, id, c, barcode_directory, **kwargs):
+#     import os
+#     import subprocess
+#
+#     # Create output directory
+#     os.makedirs(f'temp/{barcode_directory}/clusters/barcodes/', exist_ok=True)
+#
+#     cluster_out = f'temp/{barcode_directory}/clusters/barcodes/cluster-result_all_seqs.fasta'
+#
+#     # vsearch --cluster_fast clusters sequences based on global identity
+#     cmd = [
+#         'vsearch',
+#         '--cluster_fast', output_fn,                  # input FASTA
+#         '--id', str(id),                              # minimum identity, e.g., 0.98 for 98%
+#         '--strand', 'both',                           # search both strands
+#         '--threads', str(threads),
+#         '--centroids', cluster_out,                  # representative sequences per cluster
+#         '--uc', f'{cluster_out}.uc',                 # cluster membership info
+#         '--sizein',
+#         '--sizeout'
+#     ]
+#
+#     # Run vsearch
+#     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+#     if result.returncode != 0:
+#         print(f"vsearch failed:\n{result.stderr}")
+#         raise subprocess.CalledProcessError(result.returncode, cmd)
+#
+#     print(f"vsearch clustering complete. Output written to {cluster_out}")
+
+    # # Parse the clusters
+    # parse_clusters(cluster_out, min_sequences, barcode_directory)
 
 def cluster(output_fn, min_sequences, threads, id, c, barcode_directory, **kwargs):
     cluster_out = f'temp/{barcode_directory}/clusters/barcodes/cluster-result_all_seqs.fasta'
@@ -50,12 +82,12 @@ def cluster(output_fn, min_sequences, threads, id, c, barcode_directory, **kwarg
                '--threads', str(threads),
                '--kmer-per-seq', '1000',
                '--cluster-steps', '5',
-               '--max-iterations', '1000',
+               '--max-iterations', '10',
                '--alignment-mode', '3',
-               '--cluster-mode', '1',
+               '--cluster-mode', '2',
                '--min-seq-id', str(id),
                '-c', str(c),
-               '-k', '3',
+               '-k', '9',
                '--similarity-type', '1',
                '--remove-tmp-files', '0',
                output_fn, f'temp/{barcode_directory}/clusters/barcodes/cluster-result', 'temp']
@@ -88,6 +120,8 @@ def save_full_seqs(reoriented_fn, barcode_directory, **kwargs):
 
     pos_index = build_position_index(reoriented_fn)
 
+    print(sorted([len(v) for k,v in cluster_map.items()]))
+
     written_clusters = 0
     for cluster, idxs in cluster_map.items():
         with open(f"temp/{barcode_directory}/clusters/full_seqs/cluster_{cluster}.fastq", "w") as f:
@@ -110,8 +144,6 @@ def build_position_index(fastq_file):
                 break
 
             if line.startswith('@'):
-
-                header_id = line[1:].strip().split()[0]
                 header_to_position[pos] = char_pos
 
                 # Skip the next 3 lines (sequence, +, quality)
@@ -122,7 +154,6 @@ def build_position_index(fastq_file):
 
     print(f"Index complete: {len(header_to_position):,} positions stored")
     return header_to_position
-
 
 def get_sequence_by_position(fastq_file, position):
     with open(fastq_file, 'r') as f:
