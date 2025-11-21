@@ -10,11 +10,10 @@ from dnabarmap.map import determine_mapping
 
 
 def main(**kwargs):
-    extra = 10
     # c = 0.75
+    extra = 10
 
     initial_time = time.time()
-    kwargs['input_fn'] = kwargs['fastq_fn']
     kwargs['fastq_fn'] = kwargs['input_fn'].replace('.pkl', '.fastq') # in case synthetic data
     barcode_out = 'temp/'+kwargs['input_fn'].split('/')[-1].split('.')[0] + '_barcodes.fasta'
     kwargs['output_fn'] = barcode_out
@@ -26,7 +25,7 @@ def main(**kwargs):
     # Extract and align barcodes using approximate alignment to degenerate reference
     print('Aligning barcodes...')
     align_start_time = time.time()
-    align(extra=extra, **kwargs)
+    align(**kwargs)
     align_time = time.time() - align_start_time
     print(f'Finished aligning and extracting barcodes in {round(align_time / 60, 1)} minutes\n')
 
@@ -61,10 +60,10 @@ def cli():
     parser = argparse.ArgumentParser()
 
     # Directories and filenaemes
-    parser.add_argument('--fastq_fn', type=str, default=None)
+    parser.add_argument('--fastq_fn', type=str, default='syndata/syndataA.fastq')
     parser.add_argument("--mapping_fn", default=None,
                         help="Final mapping output filename")
-    parser.add_argument("--base_fn", default='syndata/syndataB',
+    parser.add_argument("--base_fn", default='syndata/syndataA',
                         help="Filename base to use when fasta_fn, fastq_fn, or mapping_fn is not provided")
 
     # Define barcode and sequence parameters
@@ -100,6 +99,7 @@ def cli():
     args = parser.parse_args()
 
     # Set up directories and filenames
+    args.input_fn = args.fastq_fn
     args.barcode_directory = 'barcode_' + args.input_fn.split('/barcode')[-1].split('/')[0].split('_')[0]
     args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
     args.output_dir = f'temp/{args.barcode_directory}/'

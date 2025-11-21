@@ -63,8 +63,13 @@ def initialize_sequences(sequences, barcode_template, data,
     max_len = int(3.5 * len(barcode_template)) # slightly larger so there are sufficient nans
 
     # Initialize top and bottom seq arrays and top reference array
-    sequences_A = [i[buffer:buffer + template_len] for i in sequences]
-    sequences_B = [reverse_complement(i)[buffer:buffer + template_len] for i in sequences]
+    rev_sequences = [reverse_complement(i) for i in sequences]
+    sequences_A = [s[buffer:buffer + template_len] + s[:buffer] for s in sequences]
+    sequences_B = [rs[buffer:buffer + template_len] + rs[:buffer] for rs in rev_sequences]
+    sequences_A = [s[:template_len] for s in sequences_A]
+    sequences_B = [s[:template_len] for s in sequences_B]
+
+    del rev_sequences
 
     reference_array = reference_to_array(barcode_template, max_len)
     seq_A_array = sequences_to_array(sequences_A, reference_array.shape[-1])
@@ -83,10 +88,18 @@ def initialize_sequences(sequences, barcode_template, data,
     for batch_idx in range(0, seq_stacked.shape[1], batch_size):
         batch_end = min(batch_idx + batch_size, seq_stacked.shape[1])
 
-        # Find best roll and score for both strands simultaneously
-        rolls, sub_directions = find_best_rolls_batch(
+        if batch_idx == 0:
+            rolls, sub_directions = find_best_rolls_batch(
             seq_stacked[:, batch_idx:batch_end],
-            ref_stacked[:, batch_idx:batch_end])
+            ref_stacked[:, batch_idx:batch_end], -1)
+            initial_shift = int(rolls.mean())
+
+        else:
+            # Find best roll and score for both strands simultaneously
+            rolls, sub_directions = find_best_rolls_batch(
+                seq_stacked[:, batch_idx:batch_end],
+                ref_stacked[:, batch_idx:batch_end],
+                initial_shift)
 
         directions[batch_idx:batch_end] = sub_directions
         best_rolls[batch_idx:batch_end] = rolls
@@ -151,7 +164,7 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
     return sequences, headers, data, seq_limit_for_debugging
 
 def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
-          synthetic_data_available, buffer, extra,
+          synthetic_data_available, buffer,
           **kwargs):
 
     # Load dataset
@@ -180,13 +193,14 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
 
     threshold = 0
     passing_idxs = np.where(scores > threshold)[0]
-
     passed_seqs = []
     for i in passing_idxs:
-        decoded_reference, decoded_seq = decode_alignment(sequence_array[i], reference_array[i], reduce=True, extra=extra)
+        decoded_reference, decoded_seq = decode_alignment(sequence_array[i], reference_array[i], reduce=True,
+                                                          extra=10)
         passed_seqs.append((i, decoded_seq))
 
     if synthetic_data_available:
+
         print('\nFinal alignment results:')
         report_alignment_result(sequence_array, reference_array, data, seq_limit_for_debugging, range(sequence_array.shape[0]), plot=True)
 

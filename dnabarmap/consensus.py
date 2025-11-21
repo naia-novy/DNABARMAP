@@ -26,14 +26,12 @@ def determine_consensus(threads, barcode_directory, **kwargs):
 
         with open(draft_path, "w") as out_fn:
             cmd = ['abpoa',
-                   '-m 1',
+                   '-m 0',
                    '-O 5,5',
                    '-E 2,2',
-                   # '-M 4',
                    '-Q',
-                   '-i',
-                   '-s',
                    '-r 5',
+                   '-a', '1',
                    fn]
         #     subprocess.run(cmd, stdout=out_fn, stderr=subprocess.DEVNULL, check=True)
             result = subprocess.run(
@@ -60,7 +58,7 @@ def determine_consensus(threads, barcode_directory, **kwargs):
                    draft_paf,
                    draft_path,
                    '--no-trimming',
-                   '-q 5',
+                   '-q 10',
                    '-w 2000', # perform poa on majority/all sequence length since they are already clustered
                    '-t', str(threads)]
             subprocess.run(cmd, stdout=out_cons, stderr=subprocess.DEVNULL, check=True)

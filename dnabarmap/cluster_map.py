@@ -68,8 +68,8 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--buffer', type=int, default=60,
-                        help='Expected constant region on the DNA fragment before the barcode to be shaved off')
+    # parser.add_argument('--buffer', type=int, default=60,
+    #                     help='Expected constant region on the DNA fragment before the barcode to be shaved off')
 
 
     parser.add_argument("--id", type=float, default=0.75, help="Value between 0 and 1 for "

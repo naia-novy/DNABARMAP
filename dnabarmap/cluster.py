@@ -81,15 +81,18 @@ def cluster(output_fn, min_sequences, threads, id, c, barcode_directory, **kwarg
                'easy-cluster',
                '--threads', str(threads),
                '--kmer-per-seq', '1000',
-               '--cluster-steps', '5',
-               '--max-iterations', '10',
+               '--cluster-steps', '3',
+               '--cluster-reassign', '1',
+               '--max-iterations', '1000',
                '--alignment-mode', '3',
-               '--cluster-mode', '2',
+               '--cluster-mode', '0',
                '--min-seq-id', str(id),
                '-c', str(c),
-               '-k', '9',
+               '-k', '7',
+               '-s', '1.0',
                '--similarity-type', '1',
                '--remove-tmp-files', '0',
+               '--cov-mode', '1',
                output_fn, f'temp/{barcode_directory}/clusters/barcodes/cluster-result', 'temp']
 
         result = subprocess.run(
@@ -109,13 +112,15 @@ def save_full_seqs(reoriented_fn, barcode_directory, **kwargs):
     cluster_map = defaultdict(list)
 
     clusters = glob(f"temp/{barcode_directory}/clusters/barcodes/cluster_*.fasta")
+    pos = 0
     for i, cluster in enumerate(clusters):
-        cluster_id = cluster.split('_')[-1].split('.')[0]
+        # cluster_id = cluster.split('_')[-1].split('.')[0]
         with open(cluster) as f:
             for L in f.readlines():
                 if L.startswith('>'):
                     id = L[1:].strip().split()[0]
-                    cluster_map[cluster_id].append(id)
+                    cluster_map[i].append(pos)
+                    pos += 1
 
 
     pos_index = build_position_index(reoriented_fn)

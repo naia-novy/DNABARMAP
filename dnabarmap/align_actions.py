@@ -88,10 +88,16 @@ def compute_adjacency_score(seqs, refs, max_run):
 
     return final_scores
 
-def find_best_rolls_batch(seqs, refs):
+def find_best_rolls_batch(seqs, refs, initial_shift=100):
     # Parameters
-    max_shift = min(60, seqs.shape[2] // 2)
-    provided_range = np.arange(-max_shift, max_shift + 1)
+    if initial_shift < 0:
+        max_shift = seqs.shape[-2]
+        min_shift = -1
+    else:
+        diff = 50
+        max_shift = initial_shift + diff
+        min_shift = initial_shift - diff
+    provided_range = np.arange(min_shift, max_shift + 1)
     n_rolls = len(provided_range)
     n_strands, n_seqs, seq_len, seq_dim = seqs.shape
 
