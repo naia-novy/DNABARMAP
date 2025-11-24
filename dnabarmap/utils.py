@@ -2,7 +2,9 @@ import pandas as pd
 import os
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
 import gzip
+import uuid
 
 def import_cupy_numpy(print_note=False):
     gpu_available = False
@@ -171,26 +173,34 @@ def write_full_fastq(sequences, directions, barcode_fn, full_fn, filtered_fn):
     # build index -> barcode mapping
     idx_to_barcode = {int(i): s for i, s in sequences}
 
-    # write barcode fasta
-    with open(barcode_fn, "w") as bf:
-        for idx, seq in idx_to_barcode.items():
-            bf.write(f">{idx}\n{seq}\n")
-
+    barcodes = []
     matched_records = []
     for i, rec in enumerate(SeqIO.parse(full_fn, "fastq")):
         if i in idx_to_barcode:
+            rec.id = str(uuid.uuid4())[:6] + '-' + rec.id
             if directions[i] == 1:  # reverse complement required
-                new_seq = rec.seq.reverse_complement() # reverse complement sequence
+                new_seq = Seq(reverse_complement(str(rec.seq))) # reverse complement sequence
                 new_quals = rec.letter_annotations["phred_quality"][::-1] # reverse quality scores
                 rec = SeqRecord(
                     new_seq,
                     id=rec.id,
-                    description=rec.description,
                     letter_annotations={"phred_quality": new_quals})
-            matched_records.append(rec)
+            else:
+                rec = SeqRecord(
+                    rec.seq,
+                    id=rec.id,
+                    letter_annotations={"phred_quality": rec.letter_annotations["phred_quality"]})
+                matched_records.append(rec)
+
+            # write barcode fasta
+            barcode = SeqRecord(
+                    Seq(idx_to_barcode[i]),
+                    id=rec.id)
+            barcodes.append(barcode)
 
     # write filtered full reads with qualities preserved
     SeqIO.write(matched_records, filtered_fn, "fastq")
+    SeqIO.write(barcodes, barcode_fn, "fasta")
     print(f"Wrote {len(matched_records)} barcodes to {barcode_fn}")
     print(f"Wrote {len(matched_records)} full reads to {filtered_fn}")
 
@@ -256,6 +266,7 @@ def read_fastqgz(filename, seq_limit=None):
                 break
 
     return sequences, headers
+
 def convert_AA_to_nucleotide(aa_seq_list):
     codon_usage = pd.read_csv('ecoli_codon_usage.csv')
 

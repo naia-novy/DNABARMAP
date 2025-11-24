@@ -10,7 +10,7 @@ from dnabarmap.utils import read_fastq, read_fastqgz, write_full_fastq, degenera
 
 
 
-def decode_alignment(sequence, reference=None, reduce=False, extra=5):
+def decode_alignment(sequence, reference=None, reduce=False, extra=0):
     """Convert one-hot encoded sequence array or alignment back to nucleotide sequence."""
     sequences = []
     if reference is not None and reduce:
@@ -64,10 +64,14 @@ def initialize_sequences(sequences, barcode_template, data,
 
     # Initialize top and bottom seq arrays and top reference array
     rev_sequences = [reverse_complement(i) for i in sequences]
-    sequences_A = [s[buffer:buffer + template_len] + s[:buffer] for s in sequences]
-    sequences_B = [rs[buffer:buffer + template_len] + rs[:buffer] for rs in rev_sequences]
-    sequences_A = [s[:template_len] for s in sequences_A]
-    sequences_B = [s[:template_len] for s in sequences_B]
+    sequences_A = [i+i+i+i+i for i in sequences]
+    sequences_B = [i+i+i+i+i for i in rev_sequences]
+    # sequences_A = [s[buffer:buffer + template_len] + s[:buffer] for s in sequences]
+    # sequences_B = [rs[buffer:buffer + template_len] + rs[:buffer] for rs in rev_sequences]
+    sequences_A = [s[buffer:buffer + template_len] for s in sequences_A]
+    sequences_B = [rs[buffer:buffer + template_len] for rs in sequences_B]
+    sequences_A = [s[:template_len] if len(s) >= template_len else 'N' * template_len for s in sequences_A]
+    sequences_B = [s[:template_len] if len(s) >= template_len else 'N' * template_len for s in sequences_B]
 
     del rev_sequences
 
@@ -92,7 +96,7 @@ def initialize_sequences(sequences, barcode_template, data,
             rolls, sub_directions = find_best_rolls_batch(
             seq_stacked[:, batch_idx:batch_end],
             ref_stacked[:, batch_idx:batch_end], -1)
-            initial_shift = int(rolls.mean())
+            initial_shift = int(np.median(rolls))
 
         else:
             # Find best roll and score for both strands simultaneously
@@ -117,7 +121,7 @@ def initialize_sequences(sequences, barcode_template, data,
     return best_sequences, directions
 
 
-def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False, extra=5):
+def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False, extra=0):
     # Print alignment to true barcode and barcode reference
     results = []
     decoded_sequences = []
@@ -164,7 +168,7 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
     return sequences, headers, data, seq_limit_for_debugging
 
 def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
-          synthetic_data_available, buffer,
+          synthetic_data_available, buffer, extra,
           **kwargs):
 
     # Load dataset
@@ -196,7 +200,7 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
     passed_seqs = []
     for i in passing_idxs:
         decoded_reference, decoded_seq = decode_alignment(sequence_array[i], reference_array[i], reduce=True,
-                                                          extra=10)
+                                                          extra=extra)
         passed_seqs.append((i, decoded_seq))
 
     if synthetic_data_available:
@@ -243,7 +247,7 @@ def cli():
     args.output_fn = args.input_fn.replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
     args.filtered_fn = args.output_fn.replace('barcodes.fasta', 'filtered.fastq')
     args.reoriented_fn= args.fastq_fn.replace('.fastq', '_reoriented.fastq')
-    args.extra = 10
+    args.extra = 0
     # Run alignment
     align(**vars(args))
 
