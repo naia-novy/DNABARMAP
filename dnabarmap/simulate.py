@@ -14,15 +14,15 @@ def simulate_many(sequences):
             tmp_fasta.write(f">{idx}\n")
             tmp_fasta.write(f"{sequence}\n")
 
-    model_dir = Path(environ.get("PBSIM_MODELS", "/default/path"))
-    model_file = model_dir / "QSHMM-ONT-HQ.model"
+    model_dir = 'pbsim3_models/'
+    model_file = model_dir + "QSHMM-ONT-HQ.model"
 
     prefix = fasta_filename.replace('.fasta', '')
     pbsim_command = [
         'pbsim',
         '--strategy', 'templ',
         '--method', 'qshmm',
-        '--qshmm', model_file,
+        '--qshmm', str(model_file),
         '--template', fasta_filename,
         '--prefix', prefix,
         '--depth', '1'

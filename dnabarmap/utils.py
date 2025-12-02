@@ -184,23 +184,31 @@ def write_full_fastq(sequences, directions, barcode_fn, full_fn, filtered_fn):
                 rec = SeqRecord(
                     new_seq,
                     id=rec.id,
+                    description="",
                     letter_annotations={"phred_quality": new_quals})
             else:
                 rec = SeqRecord(
                     rec.seq,
                     id=rec.id,
+                    description="",
                     letter_annotations={"phred_quality": rec.letter_annotations["phred_quality"]})
-                matched_records.append(rec)
+            matched_records.append(rec)
 
             # write barcode fasta
             barcode = SeqRecord(
                     Seq(idx_to_barcode[i]),
+                    description="",
                     id=rec.id)
             barcodes.append(barcode)
 
     # write filtered full reads with qualities preserved
     SeqIO.write(matched_records, filtered_fn, "fastq")
-    SeqIO.write(barcodes, barcode_fn, "fasta")
+
+    # Write barcodes in single-line format manually
+    with open(barcode_fn, "w") as f:
+        for barcode in barcodes:
+            f.write(f">{barcode.id}\n{str(barcode.seq)}\n")
+
     print(f"Wrote {len(matched_records)} barcodes to {barcode_fn}")
     print(f"Wrote {len(matched_records)} full reads to {filtered_fn}")
 

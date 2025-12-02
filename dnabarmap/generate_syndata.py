@@ -172,21 +172,21 @@ def cli():
                         help='Length of barcode when generating')
     parser.add_argument('--max_homopolymer_len', type=int, default=4,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--attempt_n_barcodes', type=int, default=2000,
+    parser.add_argument('--attempt_n_barcodes', type=int, default=200,
                         help='Number of attempts to generate barcode template')
     parser.add_argument('--motif', type=str, default=None,
                         help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate sampling')
 
     # Parameters defining what syndata to generate
-    parser.add_argument('--duplication_rate', type=int, default=200,
+    parser.add_argument('--duplication_rate', type=int, default=50,
                         help='Analogous to sequencing depth')
     parser.add_argument('--barcodes_per_variant', type=int, default=10)
     parser.add_argument('--num_variants', type=int, default=10)
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str, #VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH
-                        default='VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH',
-                        # default='HNYRYRYVWYVYWMNYDVYRYNMRYVYDSNYRYRYVHDYV',
+                        # default='TGAAMNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBNCGGT',
+                        default='TGAAMNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBNCGGT',
                         # default='BDVYDNSWNNKVYKNBMKNNVYKYSNKHKVKVHKNSKYVBBKMDNBMKNN',
                         # default='BVNWMBDBHVDYHNMDYNHVDBHNMDBHHSDYDHVKVNHDBMKNHHSWNBNMDYVHDVBHHWVBMDBVNH',
                         # default='DDVWBHVDSWBNWRDKWRWNKRHNKRWKDVDWBWRDKWRWWBVWNRBDWRWBDSDMNBND',
@@ -202,9 +202,9 @@ def cli():
                        'GCGAGTTCGCTCGCAGAACATAAACTCAAAGACGTTCGCGAGAAAATGGCCGACCTTGCACGTATGGAAACCGTCTTATCTGAACT'
                        'GGTTTGCGCGTGTCATGCGCGCAAGGGTAATGTTAGCTGTCCGCTGATTGCGAGCTTGCAGGGTGAGGCCGGCTTAGCCCGGAGCGCAATGCCGTAA',
                         help='Sequence that barcodes will be mapped to')
-    parser.add_argument('--left_coding_flank', type=str, default='CTGCTATCGT',
+    parser.add_argument('--left_coding_flank', type=str, default='CCCACTG',
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--right_coding_flank', type=str, default='ATCTAGCATC',
+    parser.add_argument('--right_coding_flank', type=str, default='ATGCGTA',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
     parser.add_argument('--fn', type=str, default='syndata/syndataB')
 

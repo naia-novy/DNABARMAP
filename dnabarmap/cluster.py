@@ -1,10 +1,7 @@
 import subprocess
 from Bio import SeqIO
-from Bio.Seq import Seq
-from collections import defaultdict
 from glob import glob
 from dnabarmap.utils import import_cupy_numpy
-from Bio.SeqRecord import SeqRecord
 from os import makedirs, path
 import uuid
 
@@ -50,17 +47,17 @@ def cluster(output_fn, min_sequences, threads, id, c, barcode_directory, **kwarg
                'easy-cluster',
                '--threads', str(threads),
                '--kmer-per-seq', '1000',
-               '--cluster-steps', '3',
+               '--cluster-steps', '5',
                '--cluster-reassign', '1',
-               '--max-iterations', '1000',
+               '--max-iterations', '2000',
                '--alignment-mode', '3',
-               '--cluster-mode', '0',
+               '--cluster-mode', '1',
                '--min-seq-id', str(id),
                '-c', str(c),
-               '-k', '7',
-               '-s', '1.0',
+               '-k', '10',
+               '-s', '7.0',
                '--similarity-type', '1',
-               '--remove-tmp-files', '0',
+               '--remove-tmp-files', '1',
                '--shuffle', '0',
                '--cov-mode', '1',
                output_fn, f'temp/{barcode_directory}/clusters/barcodes/cluster-result', 'temp']

@@ -6,18 +6,17 @@ from shutil import rmtree
 from dnabarmap.array_align import align
 from dnabarmap.cluster import cluster, save_full_seqs
 from dnabarmap.consensus import determine_consensus
-from dnabarmap.map import determine_mapping
+from dnabarmap.map import consensus_mapping
 
 
 def main(**kwargs):
-    extra = 15
-    c = 1.0
 
     initial_time = time.time()
     kwargs['output_fn'] = kwargs['input_fn']
     # kwargs['id'] = round(kwargs['id'] * len(kwargs['barcode_template'])/(extra*2+len(kwargs['barcode_template'])), 2)
     # kwargs['c'] = round(kwargs['id'], 2)
-    kwargs['c'] = round(c, 2)
+    kwargs['id'] = round(kwargs['id'], 2)
+    kwargs['c'] = 0.75 # round(kwargs['id'], 2)
 
     # Cluster aligned barcodes using vsearch
     print('Clustering barcodes...')
@@ -37,7 +36,7 @@ def main(**kwargs):
     # Use regular expressions to map barcodes to coding sequences for consensus sequences
     print('Mapping barcodes to coding sequences...')
     mapping_start_time = time.time()
-    determine_mapping(**kwargs)
+    consensus_mapping(**kwargs)
     mapping_time = time.time() - mapping_start_time
     print(f'Finished mapping barcodes in {round(mapping_time / 60, 1)} minutes\n')
 
@@ -59,7 +58,7 @@ def cli():
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH',
+                        default=None,
                         help='Degenerate reference for conducting approximate alignment of sequences')
     parser.add_argument("--left_coding_flank", default='TATCGT',
                         help="Left constant sequence of coding region")

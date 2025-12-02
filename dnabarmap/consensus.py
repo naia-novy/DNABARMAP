@@ -1,88 +1,42 @@
-import subprocess
-from glob import glob
-from os import makedirs, remove, path
 from Bio import SeqIO
-
-from dnabarmap.utils import import_cupy_numpy
-
-np = import_cupy_numpy()
-#
-# def determine_consensus(threads, barcode_directory, **kwargs):
-#     makedirs('temp/{barcode_directory}/consensus/draft/', exist_ok=True)
-#
-#     # Draft consesnus stage with vsearch
-#     clusters = glob(f"temp/{barcode_directory}/clusters/full_seqs/cluster_*.fastq")
-#     to_remove = []
-#     for i, fn in enumerate(clusters):
-#         if i % 100 == 0:
-#             sub_dir = f"temp/{barcode_directory}/consensus/consensus_{i}"
-#             makedirs(sub_dir+'/draft', exist_ok=True)
-#
-#             if i != 0:
-#                 print(f"Consensus sequence generated for {i} clusters")
-#         cluster_id = fn.split('_')[-1].split('.')[0]
-#         draft_path = f"{sub_dir}/draft/cluster_{cluster_id}_consensus.fastq"
-#         draft_paf = f"{sub_dir}/draft/cluster_{cluster_id}_consensus.paf"
-#         consensus_path = f"{sub_dir}/cluster_{cluster_id}_consensus.fasta"
-#
-#         with open(draft_path, "w") as out_fn:
-#             cmd = ['abpoa',
-#                    '-m 1',
-#                    #'-O 5,5',
-#                    #'-E 2,2',
-#                    '-Q',
-#                    '-r 5',
-#                    #'-a', '1',
-#                    fn]
-#         #     subprocess.run(cmd, stdout=out_fn, stderr=subprocess.DEVNULL, check=True)
-#             result = subprocess.run(
-#                 cmd,
-#                 stdout=out_fn,
-#                 stderr=subprocess.PIPE,
-#                 text=True
-#             )
-#             if result.returncode != 0:
-#                 print(f"abpoa failed on {fn}:\n{result.stderr}")
-#                 raise subprocess.CalledProcessError(result.returncode, cmd)
-#
-#         with open(draft_paf, "w") as out_paf:
-#             cmd = ['minimap2',
-#                    '-x', 'map-ont',
-#                    '-t', str(threads),
-#                    draft_path,
-#                    fn]
-#             subprocess.run(cmd, stdout=out_paf, stderr=subprocess.DEVNULL, check=True)
-#
-#         with open(consensus_path, "w") as out_cons:
-#             cmd = ['racon',
-#                    fn,
-#                    draft_paf,
-#                    draft_path,
-#                    '--no-trimming',
-#                    '-q 10',
-#                    '-w 2000', # perform poa on majority/all sequence length since they are already clustered
-#                    '-t', str(threads)]
-#             subprocess.run(cmd, stdout=out_cons, stderr=subprocess.DEVNULL, check=True)
-#
-#         to_remove.append(draft_path)
-#         to_remove.append(draft_paf)
-#
-#         if len(to_remove) >= 100:
-#             # time.sleep(3) # allow system to register writing of new files
-#             for fn in to_remove:
-#                 remove(fn)
-#             to_remove = []
-#
-#     if len(to_remove) > 0:
-#         # time.sleep(5)  # allow system to register writing of new files
-#         for fn in to_remove:
-#             remove(fn)
-#
-#     print(f"Consensus sequence generatation complete for {i+1} clusters")
 from glob import glob
 from os import makedirs, remove, path
 from pathlib import Path
 import subprocess
+from Bio.Align import PairwiseAligner
+
+
+from dnabarmap.utils import import_cupy_numpy
+
+np = import_cupy_numpy()
+
+
+def select_centroid(records, max_comparisons=50):
+    """Select sequence with highest average identity to others."""
+    if len(records) <= 2:
+        return records[0]
+    # Subsample if too many
+    if len(records) > max_comparisons:
+        indices = np.random.choice(len(records), max_comparisons, replace=False)
+        subset = [records[i] for i in indices]
+    else:
+        subset = records
+    aligner = PairwiseAligner()
+    aligner.mode = 'global'
+    aligner.match_score = 1
+    aligner.mismatch_score = 0
+    aligner.open_gap_score = -1
+    aligner.extend_gap_score = -0.5
+    # Compute pairwise identity scores
+    scores = np.zeros(len(subset))
+    for i, rec_i in enumerate(subset):
+        for j, rec_j in enumerate(subset):
+            if i != j:
+                score = aligner.score(str(rec_i.seq), str(rec_j.seq))
+                max_len = max(len(rec_i.seq), len(rec_j.seq))
+                scores[i] += score / max_len
+    best_idx = np.argmax(scores)
+    return subset[best_idx]
 
 def determine_consensus(threads, barcode_directory, **kwargs):
     makedirs(f"temp/{barcode_directory}/consensus/draft/", exist_ok=True)
@@ -103,11 +57,23 @@ def determine_consensus(threads, barcode_directory, **kwargs):
         rep_paf = f"{sub_dir}/draft/cluster_{cluster_id}_rep.paf"
         consensus_path = f"{sub_dir}/cluster_{cluster_id}_consensus.fasta"
 
-        # Copy first sequence as representative
+        # Find the longest sequence (or median-length) as representative
         try:
-            with open(fn, "r") as in_f, open(rep_fastq, "w") as out_f:
-                for _ in range(4):
-                    out_f.write(in_f.readline())
+            records = list(SeqIO.parse(fn, "fastq"))
+            representative = select_centroid(records, 10)
+            # Use 90th percentile length
+            # records = list(SeqIO.parse(fn, "fastq"))
+            # lengths = np.array([len(r.seq) for r in records])
+            # q90_value = np.quantile(lengths, 0.9)
+            #
+            # # Find index of sequence closest to the 90th percentile length
+            # idx = np.argmin(np.abs(lengths - q90_value))
+            # representative = records[idx]
+
+            # Write representative to file
+            with open(rep_fastq, "w") as out_f:
+                SeqIO.write(representative, out_f, "fastq")
+
         except Exception as e:
             print(f"[Warning] Failed to extract representative for cluster {cluster_id}: {e}")
             failures += 1
@@ -138,8 +104,8 @@ def determine_consensus(threads, barcode_directory, **kwargs):
                     fn,          # all reads
                     rep_paf,     # overlaps
                     rep_fastq,   # representative sequence
-                    "--no-trimming",
-                    "-q", "7",
+                    # "--no-trimming",
+                    "-q", "8",
                     "-w", "200",
                     "-t", str(threads),
                 ]
