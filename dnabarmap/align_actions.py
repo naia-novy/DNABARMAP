@@ -1,10 +1,9 @@
 from collections import defaultdict
-from scipy.ndimage import convolve1d
+from scipy.ndimage import gaussian_filter1d
 
 from dnabarmap.utils import hot_degenerate_base_mapping, import_cupy_numpy
 np = import_cupy_numpy()
 
-from scipy.ndimage import gaussian_filter1d
 
 def sequences_to_array(sequences, max_len):
     # Convert string based DNA sequences to N x 4 array (int encoding)

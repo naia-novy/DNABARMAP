@@ -3,7 +3,6 @@ import argparse
 from os import makedirs, path
 from shutil import rmtree
 
-from dnabarmap.array_align import align
 from dnabarmap.cluster import cluster, save_full_seqs
 from dnabarmap.consensus import determine_consensus
 from dnabarmap.map import consensus_mapping
@@ -13,8 +12,6 @@ def main(**kwargs):
 
     initial_time = time.time()
     kwargs['output_fn'] = kwargs['input_fn']
-    # kwargs['id'] = round(kwargs['id'] * len(kwargs['barcode_template'])/(extra*2+len(kwargs['barcode_template'])), 2)
-    # kwargs['c'] = round(kwargs['id'], 2)
     kwargs['id'] = round(kwargs['id'], 2)
     kwargs['c'] = 0.75 # round(kwargs['id'], 2)
 

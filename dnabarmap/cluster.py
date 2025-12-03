@@ -3,7 +3,8 @@ from Bio import SeqIO
 from glob import glob
 from dnabarmap.utils import import_cupy_numpy
 from os import makedirs, path
-import uuid
+import argparse
+import time
 
 np = import_cupy_numpy()
 
@@ -115,3 +116,52 @@ def save_clusters_to_files(cluster_id, clusters, output_dir):
             f.write(id + '\n')
             f.write(seq + '\n')
 
+
+def main(**kwargs):
+    kwargs['id'] = round(kwargs['id'], 2)
+    kwargs['c'] = 0.75 # round(kwargs['id'], 2)
+
+    # Cluster aligned barcodes using vsearch
+    print('Clustering barcodes...')
+    cluster_start_time = time.time()
+    cluster(**kwargs)
+    save_full_seqs(**kwargs)
+    cluster_time = time.time() - cluster_start_time
+    print(f'Finished clustering barcodes in {round(cluster_time / 60, 1)} minutes\n')
+
+
+def cli():
+    parser = argparse.ArgumentParser()
+
+    # Directories and filenaemes
+    parser.add_argument('--input_fq', type=str, default=None, required=True,
+                        help='Combined input fasta file')
+
+    # cluster parameters
+    parser.add_argument("--id", type=float, default=0.75, help="Value between 0 and 1 for "
+                                                                           "minimum identify between barcodes for clustering."
+                                                                           "Reccomended >0.75, but can be reduced for small "
+                                                                            "libraries or extra long barcodes")
+    parser.add_argument("--min_sequences", type=int, default=20,
+                        help="Minimum num_sequences for cluster to be valid >= /"
+                             "aim for at least 3x the expected depth")
+    parser.add_argument("--threads", type=int, default=8,
+                        help="Number of threads for clustering")
+
+    all_args = parser.parse_known_args()
+    args = all_args[0]
+
+    # Set up directories and filenames
+    args.barcode_directory = 'barcode_' + args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
+    args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
+    args.output_dir = f'temp/{args.barcode_directory}/'
+    args.cluster_dir = args.output_dir + '/clusters/'
+    args.consensus_dir = args.output_dir + '/consensus/'
+    args.output_fn = 'temp/'+args.input_fq.split('/')[-1].split('.')[0] + '_barcodes.fasta'
+    args.reoriented_fn = args.input_fq.replace('.fastq', '_reoriented.fastq')
+
+    main(**vars(args))
+
+
+if __name__ == '__main__':
+    cli()

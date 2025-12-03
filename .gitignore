@@ -37,8 +37,12 @@ dnabarmap-env/
 *.swp
 make.sh
 .gitignore
+dnabarmap/count.py
+dnabarmap/misc.py
+
 
 # Large file directories
 syndata/
 DNABARMAP_outputs/
 /tmp/
+temp/

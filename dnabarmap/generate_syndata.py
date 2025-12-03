@@ -52,15 +52,6 @@ def score_template(barcode):
     return score
 
 
-def could_form_homopolymer(seq, max_len):
-    for i in range(len(seq) - max_len + 1):
-        window = seq[i:i+max_len]
-        sets = [degenerate_map.get(base, {base}) for base in window]
-        intersection = set.intersection(*sets)
-        if intersection:
-            return True  # This window could form a homopolymer
-    return False
-
 def generate_barcode_template(barcode_len, motif, max_homopolymer_len=3, attempt_n_barcodes=10, **kwargs):
     initial_template = motif * np.ceil(barcode_len / len(motif)).astype(int)
     initial_template = initial_template[:barcode_len]
@@ -184,16 +175,8 @@ def cli():
     parser.add_argument('--num_variants', type=int, default=10)
 
     # Barcode and coding parameters
-    parser.add_argument('--barcode_template', type=str, #VHBKVBHBDMKNVBYDKVBYNKSSYSKNNYSKHYSDNBMKBNSHKBSDMBBKMBBRYSBH
-                        # default='TGAAMNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBNCGGT',
+    parser.add_argument('--barcode_template', type=str,
                         default='TGAAMNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBNCGGT',
-                        # default='BDVYDNSWNNKVYKNBMKNNVYKYSNKHKVKVHKNSKYVBBKMDNBMKNN',
-                        # default='BVNWMBDBHVDYHNMDYNHVDBHNMDBHHSDYDHVKVNHDBMKNHHSWNBNMDYVHDVBHHWVBMDBVNH',
-                        # default='DDVWBHVDSWBNWRDKWRWNKRHNKRWKDVDWBWRDKWRWWBVWNRBDWRWBDSDMNBND',
-                        # default='CAGGGACTNKBSYBKSKYBSBKYBSKBYSBKMBYBKSYSKBYSKSYSKSBYBKSBYKBSYBKSBYSKBATACATGC',
-                        # Works TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCTGATC
-                        # Doesnt work ATGCAGHNNRBHDBVWBNVDYDNVBWVNBDHSNDHSNNDYVNDVYNNDVYNDVBHSDHVBHDVNBHGCATCA
-                        # Doesnt work ATGCAGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNGCATCA
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
@@ -221,12 +204,3 @@ def cli():
 
 if __name__ == '__main__':
     cli()
-
-
-# /Users/natenovy/miniconda3_mps/envs/dnabarmap/bin/python dnabarmap/generate_barcode_template.py
-# Using NumPy (CPU) as backend
-# Generating 375 optimized barcodes
-# Full filtered:
-#  [('DNRBHNRBNWBVHBDHVBDHBVBDHVBNRHNBRHNDBVHDHBVNDHBVNRHBNDMDKHVN', (4.7634599571862895, 0.3416666666666667)), ('NHDVYNDVBHVDNBHVDHSHBWVNBVWBVHDBVHDHSDHBVHDBMHBDVYVNDBHVDNBH', (4.764088071192806, 0.3444444444444444)), ('DBNHVDSHNVWBNVWBNDVHBNDVHBDNRHSBDHNRYDNVBWRDDBHVNDBHVWNBDVHD', (4.765699972735173, 0.34722222222222227)), ('VVDBHVNKHDVBHVDBMVDBBMDNBHSDHVBNDHSDVHSNDMSHVDHBVDBHNVKVHVDB', (4.768344680534585, 0.3513888888888889)), ('NNSYDNBMBDVYNVDHYNVDNYVYDHMBDHBVDHVYDHNVBWNVHBWDMNBHDVBHRBNN', (4.769394497712066, 0.3541666666666667)), ('NVWNKVBHDNVKHNRBHVDVBHNDRBHWVBDVHSDHNKVNWNKMNBWRDNBMNDVBWVND', (4.77087160005538, 0.35833333333333334)), ('DHBBVDYSDNWBVYVDBHSDHNBRYNVKNHDVKHVNKHBVNKHBVBWNVHKBVDHKNVYN', (4.771890767674831, 0.3625)), ('NHNWSNVHDBVNYWNMBVWBHVDYNVYWHNSDHRNBHWVYHDMNBNWVNBDWVYDNRBHN', (4.773677362262467, 0.36527777777777776))]
-# Best candidate: ('DNRBHNRBNWBVHBDHVBDHBVBDHVBNRHNBRHNDBVHDHBVNDHBVNRHBNDMDKHVN', (4.7634599571862895, 0.3416666666666667))
-# Elbow candidate: ('VVDBHVNKHDVBHVDBMVDBBMDNBHSDHVBNDHSDVHSNDMSHVDHBVDBHNVKVHVDB', (4.768344680534585, 0.3513888888888889))

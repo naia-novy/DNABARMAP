@@ -4,11 +4,11 @@ import os
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
+from os import makedirs, path
+from shutil import rmtree
 
 from dnabarmap.align_actions import *
 from dnabarmap.utils import read_fastq, read_fastqgz, write_full_fastq, degenerate_nucleotide_mapping, reverse_complement
-
-
 
 def decode_alignment(sequence, reference=None, extra=0):
     """Convert one-hot encoded sequence array or alignment back to nucleotide sequence."""
@@ -67,8 +67,6 @@ def initialize_sequences(sequences, barcode_template, data,
             seq_stacked[:, batch_idx:batch_end],
             reference_array)
 
-        print(sum(sub_directions))
-
         directions[batch_idx:batch_end] = sub_directions
         best_rolls[batch_idx:batch_end] = rolls
 
@@ -106,16 +104,16 @@ def report_alignment_result(best_sequences, reference_array, data, seq_limit_for
         sns.histplot(results, bins=20)
         plt.show()
 
-def load_data(input_fn, seq_limit_for_debugging, batch_size):
+def load_data(input_fq, seq_limit_for_debugging, batch_size):
     # Load data according to the filetype provided
-    if input_fn.endswith('.fastq'):
-        sequences, headers = read_fastq(input_fn, seq_limit_for_debugging)
+    if input_fq.endswith('.fastq'):
+        sequences, headers = read_fastq(input_fq, seq_limit_for_debugging)
         data = None
-    elif input_fn.endswith('.fastq.gz'):
-        sequences, headers = read_fastqgz(input_fn, seq_limit_for_debugging)
+    elif input_fq.endswith('.fastq.gz'):
+        sequences, headers = read_fastqgz(input_fq, seq_limit_for_debugging)
         data = None
-    elif input_fn.endswith('.pkl'):
-        data = pd.read_pickle(input_fn)
+    elif input_fq.endswith('.pkl'):
+        data = pd.read_pickle(input_fq)
         if seq_limit_for_debugging is None:
             seq_limit_for_debugging = len(data.synthetic_sequence)
         assert batch_size <= seq_limit_for_debugging
@@ -131,15 +129,15 @@ def load_data(input_fn, seq_limit_for_debugging, batch_size):
 
     return sequences, headers, data, seq_limit_for_debugging
 
-def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
+def align(input_fq, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
           synthetic_data_available, extra,
           **kwargs):
 
     # Load dataset
-    assert os.path.exists(input_fn)
+    assert os.path.exists(input_fq)
     if synthetic_data_available:
-        assert input_fn.endswith('.pkl')
-    sequences, headers, data, seq_limit_for_debugging = load_data(input_fn, seq_limit_for_debugging, batch_size)
+        assert input_fq.endswith('.pkl')
+    sequences, headers, data, seq_limit_for_debugging = load_data(input_fq, seq_limit_for_debugging, batch_size)
 
     # Initialize sequence, reference, and patience arrays
     sequence_array, directions = initialize_sequences(sequences, barcode_template, data,
@@ -167,11 +165,15 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
         passed_seqs.append((int(i), decoded_seq))
 
     # Save alignments
-    write_full_fastq(passed_seqs, directions, output_fn, input_fn, reoriented_fn)
+    write_full_fastq(passed_seqs, directions, output_fn, input_fq, reoriented_fn)
 
 
 def cli():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--input_fq', type=str, default=None, required=True)
+    parser.add_argument('--barcode_template', type=str, required=True,
+                        help='Reference degenerate barcode to align sequences to')
+
     # Set debugging/optimization parameters
     parser.add_argument('--seq_limit_for_debugging', type=int, default=None,
                         help='Filter dataset to subset for debugging')
@@ -179,16 +181,10 @@ def cli():
                         help='Compare alignments to synthetic data or true values')
 
     # Set alignment parameters
-    parser.add_argument('--batch_size', type=int, default=256)
-    parser.add_argument('--patience', type=int, default=0,
-                        help='How many times to try next best suggestion before giving up')
-    parser.add_argument('--barcode_template', type=str,
-                        default=None, # TATGAYHWSBYRVWBYMDSKWWVSBWSSWDRKMDSYMWYSKRWYDRYSKMSYDYSWVYRYKRYVRCGATC
-                                           help='Reference degenerate barcode to align sequences to')
-    parser.add_argument('--input_fn', type=str, default=None)
-    parser.add_argument('--fastq_fn', type=str, default=None)
+    parser.add_argument('--batch_size', type=int, default=512)
 
-    args = parser.parse_args()
+    all_args = parser.parse_known_args()
+    args = all_args[0]
 
     # Log processing speed metrics for optimization
     if args.synthetic_data_available:
@@ -198,12 +194,30 @@ def cli():
         pr = cProfile.Profile()
         pr.enable()
 
-    args.input_fn = args.fastq_fn if args.input_fn is None else args.input_fn
-
-    args.output_fn = args.input_fn.replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
+    args.output_fn = args.input_fq.replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
     args.filtered_fn = args.output_fn.replace('barcodes.fasta', 'filtered.fastq')
-    args.reoriented_fn= args.fastq_fn.replace('.fastq', '_reoriented.fastq')
+    args.reoriented_fn= args.input_fq.replace('.fastq', '_reoriented.fastq')
+    args.output_fn = 'temp/'+args.input_fq.split('/')[-1].split('.')[0] + '_barcodes.fasta'
+
+    args.barcode_directory = 'barcode_' + args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
+    args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
+    args.output_dir = f'temp/{args.barcode_directory}/'
+    args.cluster_dir = args.output_dir + '/clusters/'
+    args.consensus_dir = args.output_dir + 'consensus/'
     args.extra = 5
+
+    # remove previous iterations
+    if path.exists(args.cluster_dir):
+        rmtree(args.cluster_dir)
+    if path.exists(args.consensus_dir):
+        rmtree(args.consensus_dir)
+    if path.exists(args.output_dir):
+        rmtree(args.output_dir)
+
+    makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
+    makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)
+    makedirs(args.consensus_dir, exist_ok=True)
+    makedirs('DNABARMAP_outputs', exist_ok=True)
 
     # Run alignment
     align(**vars(args))

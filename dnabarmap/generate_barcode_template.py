@@ -194,12 +194,6 @@ def optimize_barcode_template(barcode_len, ks, initial_designs, opt_frac, iterat
 
         best_candidates.append((d, current_score))
 
-        # sns.lineplot(track)
-        # plt.show()
-
-        # best = sorted(candidates, key=lambda x: x[1][0])[-1]
-        # best_candidates.append(best)
-
     return best_candidates
 
 
@@ -214,7 +208,6 @@ def cli():
                         help='Do not allow sequences with possible homopolymers longer than this value')
     parser.add_argument('--iterations', type=int, default=500,
                         help='Simulated annealing iterations for each barcode template')
-    # parser.add_argument('--ks', type=int, default=[2,3,4,5,6,7,8,9,10], nargs='+',
     parser.add_argument('--ks', type=int, default=[2,3,4,5,6,7,8,9,10], nargs='+',
 
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
@@ -230,14 +223,9 @@ def cli():
 
     candidates = optimize_barcode_template(**vars(args))
     pareto_candidates = pareto_front(candidates)
-    # best_candidates = sorted(candidates, key=lambda x: x[1][0]*x[1][1])
-    # best_candidates = [(x[0], adjust_p(x[1][0])) for x in best_candidates]
     best_candidates = sorted(pareto_candidates, key=lambda x: x[1][0]*x[1][1])
-    # best_candidates = [(x[0], x[1][0]) for x in best_candidates]
     filtered_candidates = [(i[0], (adjust_p(i[1][0]), i[1][1]))  for i in best_candidates if all([n not in i[0] for n in nucleotides])]
 
-    # print('Full results: \n', best_candidates)
-    # print(f'Best candidate: {best_candidates[0][1], best_candidates[0][1]}\n')
 
     print('Full filtered: \n', filtered_candidates)
     print(f'Best candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')

@@ -3,7 +3,6 @@ from Bio import SeqIO
 from collections import Counter
 import subprocess
 
-
 from dnabarmap.utils import nuc_dict
 
 def checker(barcode_template, test_barcode):
@@ -69,8 +68,6 @@ promoter_options.promoter = promoter_options.promoter + RBS
 
 mapping = {k:v for k,v in mapping.items() if v in promoter_options.promoter.values}
 count_mapping = {k:df.loc[df.barcode==k].counts.values[0] for k in mapping.keys()}
-
-
 
 final_data = []
 for k,v in mapping.items():

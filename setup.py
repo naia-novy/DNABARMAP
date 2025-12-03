@@ -28,7 +28,9 @@ setup(
         'console_scripts': [
             'dnabarmap = dnabarmap.run:cli',
             'align = dnabarmap.array_align:cli',
-            'clustermap = dnabarmap.cluster_map:cli',
+            'cluster = dnabarmap.cluster:cli',
+            'consensus = dnabarmap.consensus:cli',
+            'map = dnabarmap.map:cli',
             'generate_barcode_template = dnabarmap.generate_barcode_template:cli',
             'generate_syndata = dnabarmap.generate_syndata:cli',
         ],

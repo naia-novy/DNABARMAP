@@ -2,21 +2,15 @@ from glob import glob
 import regex
 from Bio import SeqIO
 from os.path import isdir
+import argparse
+import time
+from shutil import rmtree
+from os import makedirs, path
 
 from dnabarmap.utils import nuc_dict
 def make_orientation_matchers(barcode_template, left_coding_flank, right_coding_flank,
                           left_fuzz, right_fuzz, bar_fuzz):
     barcode_regex = build_degenerate_regex(barcode_template)
-
-    # regex_A = (
-    #     fr"({barcode_regex}){{e<={bar_fuzz},s<={bar_fuzz * sub_mult}}}[ATCGN]*"
-    #     fr"{left_coding_flank}{{e<={left_fuzz}}}([ATCGN]*){right_coding_flank}{{e<={right_fuzz}}}"
-    # )
-    #
-    # regex_B = (
-    #     fr"{left_coding_flank}{{e<={left_fuzz}}}([ATCGN]*){right_coding_flank}{{e<={right_fuzz}}}"
-    #     fr"[ATCGN]*({barcode_regex}){{e<={bar_fuzz},s<={bar_fuzz * sub_mult}}}"
-    # )
 
     regex_A = (
         fr"({barcode_regex}){{e<={bar_fuzz}}}[ATCGN]*"
@@ -31,10 +25,6 @@ def make_orientation_matchers(barcode_template, left_coding_flank, right_coding_
     return [(regex_A, 1, 2, 'A'),  (regex_B, 2, 1, 'B')]
 
 def match_with_orientation(seq, matchers, orientation_counts):
-    """
-    Try to match sequence against both orientations, starting with the more successful one.
-    Updates orientation_counts in place and returns (barcode, coding_region) or (None, None).
-    """
     # Sort matchers by success count (descending) to try the dominant one first
     sorted_matchers = sorted(matchers, key=lambda m: orientation_counts.get(m[3], 0), reverse=True)
     other_key = {'A': 'B', 'B': 'A'}
@@ -50,7 +40,6 @@ def match_with_orientation(seq, matchers, orientation_counts):
                 return None, None, orientation_counts
 
     return None, None, orientation_counts
-
 
 def build_degenerate_regex(template):
     pattern = ''
@@ -90,17 +79,19 @@ def direct_mapping(fn, barcode_template, left_coding_flank, right_coding_flank, 
 
 
 def map_barcodes(left_fuzz, right_fuzz, bar_fuzz,
-        input_data, barcode_template, left_coding_flank,
+        input_files, barcode_template, left_coding_flank,
         right_coding_flank, output_mapping_fn, barcode_directory, **kwargs):
 
-    if isdir(input_data):
-        consensus_files = glob(f"{input_data}consensus_*/cluster_*_consensus.fasta")
+    if isdir(input_files):
+        consensus_files = glob(f"{input_files}/cluster_*_consensus.fasta") # if running map
         print(f"Determining mapping for {len(consensus_files)} consensus sequences")
 
         if len(consensus_files) == 0:
-            raise Exception(f"No consensus sequences found in {input_data}/{barcode_directory}/consensus. Consider altering hyperparameters or doing deeper sequencing.")
+            consensus_files = glob(f"{input_files}/consensus*/cluster_*_consensus.fasta") # if running dnabarmap
+            if len(consensus_files) == 0:
+                raise Exception(f"No consensus sequences found in {input_files}/{barcode_directory}/consensus. Consider altering hyperparameters or doing deeper sequencing.")
     else:
-        consensus_files = [input_data]
+        consensus_files = [input_files]
 
     matchers = make_orientation_matchers(barcode_template, left_coding_flank, right_coding_flank,
                                          left_fuzz, right_fuzz, bar_fuzz)
@@ -124,20 +115,60 @@ def map_barcodes(left_fuzz, right_fuzz, bar_fuzz,
     print(f"Found a match for {observations-no_match_count}/{observations} sequences")
 
 
-if __name__ == "__main__":
-    import argparse
-
+def cli():
     parser = argparse.ArgumentParser()
-    # Set alignment parameters
-    parser.add_argument('--barcode_template', type=str,
+
+    # Directories and filenaemes
+    parser.add_argument('--consensus_dir', type=str, default=None, required=True,
+                        help='Combined input fasta file')
+    parser.add_argument("--mapping_fn", default=None, required=True,
+                        help="Final mapping output filename")
+
+    # Define barcode and sequence parameters
+    parser.add_argument('--barcode_template', type=str, required=True,
                         default=None,
-                        help='Reference degenerate barcode to align sequences to')
-    parser.add_argument('--fn', type=str, default=None)
-    parser.add_argument('--left_coding_flank', type=str, default=None)
-    parser.add_argument('--right_coding_flank', type=str, default=None)
-    parser.add_argument('--output_mapping_fn', type=str, default=None)
-    parser.add_argument('--barcode_directory', type=str, default=None)
+                        help='Degenerate reference for conducting approximate alignment of sequences')
+    parser.add_argument("--left_coding_flank", default=None, required=True,
+                        help="Left constant sequence of coding region")
+    parser.add_argument("--right_coding_flank", default=None, required=True,
+                        help="Right constant sequence of coding region")
 
     args = parser.parse_args()
 
-    direct_mapping(**vars(args))
+    # Set up directories and filenames
+
+    args.barcode_directory = args.consensus_dir.split('/consensus')[-1].split('/')[-1]
+    args.output_dir = f'temp/{args.barcode_directory}/'
+    args.cluster_dir = args.output_dir + '/clusters/'
+    args.output_mapping_fn = args.mapping_fn
+
+    # Use regular expressions to map barcodes to coding sequences for consensus sequences
+    print('Mapping barcodes to coding sequences...')
+    mapping_start_time = time.time()
+    consensus_mapping(**vars(args))
+    mapping_time = time.time() - mapping_start_time
+    print(f'Finished mapping barcodes in {round(mapping_time / 60, 1)} minutes\n')
+
+
+
+if __name__ == "__main__":
+    direct = False
+
+    if direct:
+        parser = argparse.ArgumentParser()
+        # Set alignment parameters
+        parser.add_argument('--barcode_template', type=str,
+                            default=None,
+                            help='Reference degenerate barcode to align sequences to')
+        parser.add_argument('--fn', type=str, default=None)
+        parser.add_argument('--left_coding_flank', type=str, default=None)
+        parser.add_argument('--right_coding_flank', type=str, default=None)
+        parser.add_argument('--output_mapping_fn', type=str, default=None)
+        parser.add_argument('--barcode_directory', type=str, default=None)
+
+        args = parser.parse_known_args()
+
+        direct_mapping(**vars(args))
+
+    else:
+        cli()
