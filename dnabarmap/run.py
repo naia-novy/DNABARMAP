@@ -116,8 +116,8 @@ def cli():
 
     if args.synthetic_data_available:
         assert args.input_fq.endswith('.pkl'), 'Must provide pkl format for synthetic data'
-    if args.min_sequences < 15:
-        print('WARNING: min_sequences is less than 15, this is not recommended and may cause inaccurate consensus sequence determination')
+    if args.min_sequences < 10:
+        print('WARNING: min_sequences is less than 10, this is not recommended and may cause inaccurate consensus sequence determination')
 
     makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
     makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)

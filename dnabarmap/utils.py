@@ -177,7 +177,8 @@ def write_full_fastq(sequences, directions, barcode_fn, full_fn, filtered_fn):
     matched_records = []
     for i, rec in enumerate(SeqIO.parse(full_fn, "fastq")):
         if i in idx_to_barcode:
-            rec.id = str(uuid.uuid4())[:6] + '-' + rec.id
+            add_id = str(uuid.uuid4())[:6]
+            rec.id = add_id[:] + '-' + rec.id
             if directions[i] == 1:  # reverse complement required
                 new_seq = Seq(reverse_complement(str(rec.seq))) # reverse complement sequence
                 new_quals = rec.letter_annotations["phred_quality"][::-1] # reverse quality scores
@@ -192,6 +193,7 @@ def write_full_fastq(sequences, directions, barcode_fn, full_fn, filtered_fn):
                     id=rec.id,
                     description="",
                     letter_annotations={"phred_quality": rec.letter_annotations["phred_quality"]})
+
             matched_records.append(rec)
 
             # write barcode fasta

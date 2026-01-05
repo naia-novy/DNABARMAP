@@ -41,16 +41,10 @@ def select_centroid(records, max_comparisons=50):
     best_idx = np.argmax(scores)
     return subset[best_idx]
 
-def get_output_subdir(cluster_id, base_dir, levels=1):
-    # Hash the cluster_id to get consistent distribution
-    hash_val = hash(str(cluster_id)) & 0xFFFFFFFF  # Ensure positive
+def get_output_subdir(cluster_id, consensus_dir):
+    # Always use first 2 chars of cluster ID
+    return consensus_dir + '/' + cluster_id[-2:]
 
-    parts = [base_dir]
-    for i in range(levels):
-        bin_idx = (hash_val >> (16 * i)) & 0xFF  # Extract byte
-        parts.append(f"{bin_idx:02x}")
-
-    return "/".join(parts)
 
 def determine_consensus_consecutive(threads, barcode_directory, **kwargs):
     makedirs(f"temp/{barcode_directory}/consensus/draft/", exist_ok=True)
@@ -69,16 +63,16 @@ def determine_consensus_consecutive(threads, barcode_directory, **kwargs):
         cluster_id = fn.split("_")[-1].split(".")[0]
         rep_fastq = f"{sub_dir}/draft/cluster_{cluster_id}_rep.fastq"
         rep_paf = f"{sub_dir}/draft/cluster_{cluster_id}_rep.paf"
-        consensus_path = f"{sub_dir}/cluster_{cluster_id}_consensus.fasta"
+        consensus_path = f"{sub_dir}/{cluster_id}_consensus.fasta"
 
         # Find the longest sequence (or median-length) as representative
         try:
-            records = list(SeqIO.parse(fn, "fastq"))
+            records = list(SeqIO.parse(fn, fn.split('.')[-1]))
             representative = select_centroid(records, 10)
 
             # Write representative to file
             with open(rep_fastq, "w") as out_f:
-                SeqIO.write(representative, out_f, "fastq")
+                SeqIO.write(representative, out_f, fn.split('.')[-1])
 
         except Exception as e:
             print(f"[Warning] Failed to extract representative for cluster {cluster_id}: {e}")
@@ -139,7 +133,7 @@ def determine_consensus_consecutive(threads, barcode_directory, **kwargs):
     print(f"Number of failed clusters: {failures}")
 
 def determine_consensus(threads, input_fq, **kwargs):
-    cluster_id = input_fq.split("-")[-1].split(".")[0]
+    cluster_id = input_fq.split(".")[0].split('/')[-1]
     consensus_dir = input_fq.split('clusters')[0] + '/consensus/'
     sub_dir = get_output_subdir(cluster_id, consensus_dir)
     draft_dir = sub_dir + '/draft/'
@@ -147,18 +141,18 @@ def determine_consensus(threads, input_fq, **kwargs):
     makedirs(sub_dir, exist_ok=True)
     makedirs(draft_dir, exist_ok=True)
 
-    rep_fastq = f"{draft_dir}/cluster_{cluster_id}_rep.fastq"
-    rep_paf = f"{draft_dir}/cluster_{cluster_id}_rep.paf"
-    consensus_path = f"{sub_dir}/cluster_{cluster_id}_consensus.fasta"
+    rep_fastq = f"{draft_dir}/{cluster_id}_rep.fastq"
+    rep_paf = f"{draft_dir}/{cluster_id}_rep.paf"
+    consensus_path = f"{sub_dir}/{cluster_id}_consensus.fasta"
 
     # Find the representative sequence
     try:
-        records = list(SeqIO.parse(input_fq, "fastq"))
+        records = list(SeqIO.parse(input_fq, input_fq.split('.')[-1]))
         representative = select_centroid(records, 10)
 
         # Write representative to file
         with open(rep_fastq, "w") as out_f:
-            SeqIO.write(representative, out_f, "fastq")
+            SeqIO.write(representative, out_f, input_fq.split('.')[-1])
 
     except Exception as e:
         print(f"[Warning] Failed to extract representative for cluster {cluster_id}: {e}")

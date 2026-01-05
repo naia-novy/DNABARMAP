@@ -5,7 +5,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from os import makedirs, path
-from shutil import rmtree
+from pathlib import Path
 
 from dnabarmap.align_actions import *
 from dnabarmap.utils import read_fastq, read_fastqgz, write_full_fastq, degenerate_nucleotide_mapping, reverse_complement
@@ -194,28 +194,29 @@ def cli():
         pr = cProfile.Profile()
         pr.enable()
 
-    args.output_fn = args.input_fq.replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
-    args.filtered_fn = args.output_fn.replace('barcodes.fasta', 'filtered.fastq')
-    args.reoriented_fn= args.input_fq.replace('.fastq', '_reoriented.fastq')
-    args.output_fn = 'temp/'+args.input_fq.split('/')[-1].split('.')[0] + '_barcodes.fasta'
 
     args.barcode_directory = 'barcode_' + args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
     args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
     args.output_dir = f'temp/{args.barcode_directory}/'
     args.cluster_dir = args.output_dir + '/clusters/'
-    args.consensus_dir = args.output_dir + 'consensus/'
+    args.consensus_dir = args.output_dir + '/consensus/'
+    args.aligned_dir = args.output_dir + '/aligned/'
     args.extra = 5
 
-    # remove previous iterations
-    if path.exists(args.cluster_dir):
-        rmtree(args.cluster_dir)
-    if path.exists(args.consensus_dir):
-        rmtree(args.consensus_dir)
-    if path.exists(args.output_dir):
-        rmtree(args.output_dir)
+    args.output_fn = args.aligned_dir + path.basename(Path(args.input_fq)).replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
+    args.reoriented_fn = args.aligned_dir + path.basename(Path(args.input_fq)).replace('.fastq', '_reoriented.fastq')
+
+    # # remove previous iterations
+    # if path.exists(args.cluster_dir):
+    #     rmtree(args.cluster_dir)
+    # if path.exists(args.consensus_dir):
+    #     rmtree(args.consensus_dir)
+    # if path.exists(args.output_dir):
+    #     rmtree(args.output_dir)
 
     makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
     makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)
+    makedirs(args.aligned_dir, exist_ok=True)
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
