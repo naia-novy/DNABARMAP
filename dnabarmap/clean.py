@@ -109,7 +109,7 @@ def collapse_clusters(df, barcode_to_cluster):
 template_barcode = 'MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN'
 barcode_len = len(template_barcode)
 
-promoter_path = 'updated_control_promoters2.csv'
+promoter_path = 'mapping/updated_control_promoters2.csv'
 
 # fns = ['mapping/barcode22_mapping.tsv',
 #        'mapping/barcode23_mapping.tsv']
