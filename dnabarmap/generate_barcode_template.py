@@ -183,7 +183,6 @@ def optimize_barcode_template(barcode_len, ks, initial_designs, opt_frac, iterat
         for i in range(iterations):
             proposal = mutate(d, max_homopolymer_len, iterations, no_gquad)
             prop_score = score_template(proposal, ks)
-            # delta = prop_score[0]*prop_score[1] - current_score[0]*current_score[1]
             delta = (prop_score[0]/(1+prop_score[1]) - current_score[0]/(1+current_score[1]))
 
             if delta >= 0 or random.random() < math.exp(delta / temp):
@@ -204,18 +203,18 @@ def cli():
     # Parameters if generating new barcode
     parser.add_argument('--barcode_len', type=int, default=75,
                         help='Length of barcode when generating')
-    parser.add_argument('--max_homopolymer_len', type=int, default=4,
+    parser.add_argument('--max_homopolymer_len', type=int, default=3,
                         help='Do not allow sequences with possible homopolymers longer than this value')
-    parser.add_argument('--iterations', type=int, default=500,
+    parser.add_argument('--iterations', type=int, default=1000,
                         help='Simulated annealing iterations for each barcode template')
     parser.add_argument('--ks', type=int, default=[2,3,4,5,6,7,8,9,10], nargs='+',
 
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--initial_designs', type=int, default=1000,
+    parser.add_argument('--initial_designs', type=int, default=200,
                         help='How many times to try optimizing different barcode templates')
-    parser.add_argument('--opt_frac', type=float, default=0.5,
+    parser.add_argument('--opt_frac', type=float, default=0.2,
                         help='How many times to try optimizing different barcode templates')
-    parser.add_argument('--no_gquad', default=True, action='store_true',
+    parser.add_argument('--no_gquad', default=False, action='store_true',
                         help='Eliminate the possiblility of G quadraplexes by not allowing 3 consecutive gs'
                              'This is mostly important for RNA barcodes')
 
@@ -226,17 +225,20 @@ def cli():
     best_candidates = sorted(pareto_candidates, key=lambda x: x[1][0]*x[1][1])
     filtered_candidates = [(i[0], (adjust_p(i[1][0]), i[1][1]))  for i in best_candidates if all([n not in i[0] for n in nucleotides])]
 
-
-    print('Full filtered: \n', filtered_candidates)
-    print(f'Best candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
+    # print('Full filtered: \n', filtered_candidates)
+    # print(f'Best candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
 
     x = [i[1][0] for i in filtered_candidates]
     y = [i[1][1] for i in filtered_candidates]
     sns.scatterplot(x=x, y=y)
+    plt.ylabel('K-mer Repetitiveness (minimize)')
+    plt.xlabel('Mean Degeneracy (maximize)')
+    plt.title('Barcode Template Pareto Front')
     plt.show()
 
     elbow_candidate = pick_elbow_candidate(filtered_candidates)
-    print(f'Elbow candidate: {elbow_candidate[0], elbow_candidate[1]}')
+    # print(f'Optimized degenerate barcode template: {elbow_candidate[0], elbow_candidate[1]}')
+    print(f'Optimized degenerate barcode template: {elbow_candidate[0]}')
 
 if __name__ == '__main__':
     cli()

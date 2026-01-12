@@ -37,7 +37,7 @@ dnabarmap-env/
 *.swp
 make.sh
 .gitignore
-dnabarmap/count.py
+dnabarmap/clean.py
 dnabarmap/misc.py
 
 
@@ -46,3 +46,5 @@ syndata/
 DNABARMAP_outputs/
 /tmp/
 temp/
+low_depth
+high_depth

@@ -75,10 +75,10 @@ def cluster(input_fn, reoriented_fn, min_sequences, threads, id, c, output_dir, 
                '--cluster-reassign', '1',
                '--max-iterations', '2000',
                '--alignment-mode', '3',
-               '--cluster-mode', '1',
+               '--cluster-mode', '2',
                '--min-seq-id', str(id),
                '-c', str(c),
-               '-k', '10',
+               '-k', '7',
                '-s', '7.0',
                '--similarity-type', '1',
                '--remove-tmp-files', '1',
@@ -150,7 +150,7 @@ def save_clusters_to_files(cluster_id, clusters, output_dir):
 
 def main(**kwargs):
     kwargs['id'] = round(kwargs['id'], 2)
-    kwargs['c'] = 0.75 # round(kwargs['id'], 2)
+    kwargs['c'] = 0.8 # round(kwargs['id'], 2)
 
     # Cluster aligned barcodes using vsearch
     print('Clustering barcodes...')

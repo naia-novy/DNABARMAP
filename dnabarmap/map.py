@@ -53,13 +53,12 @@ def match_with_orientation(seq, matchers, orientation_counts):
         match = regex.search(compiled_regex, seq, regex.BESTMATCH)
         if match:
             orientation_counts[name] = orientation_counts.get(name, 0) + 1
-            return match.group(barcode_group), match.group(coding_group), orientation_counts
+            return match.group(barcode_group), match.group(coding_group), orientation_counts, name
         elif sum(orientation_counts.values()) > 100:
             if orientation_counts.get(name, 0) > (orientation_counts.get(other_key[name], 0) + 1) * 100:
-                return None, None, orientation_counts
+                return None, None, orientation_counts, None
 
-    return None, None, orientation_counts
-
+    return None, None, orientation_counts, None
 
 def build_degenerate_regex(template):
     pattern = ''
@@ -146,7 +145,8 @@ def main():
 
     if direct:
         parser = argparse.ArgumentParser()
-        # Set alignment parameters
+        # Set alignment pa
+        # rameters
         parser.add_argument('--barcode_template', type=str,
                             default=None,
                             help='Reference degenerate barcode to align sequences to')

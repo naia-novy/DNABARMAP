@@ -151,6 +151,7 @@ def main(barcode_template, coding_sequence, left_coding_flank, right_coding_flan
     data.to_pickle(fasta_fn.replace('.fasta', '.pkl'))
 
     print(f"Generated {len(data)} synthetic sequences using barcode template:\n{data.reference[0]}")
+    print(f"Saved sequences to {fasta_fn.replace('.fasta', '.pkl')}")
 
     mapping = data[['true_barcode','variant']].drop_duplicates().reset_index(drop=True)
     mapping.to_csv(mapping_fn.replace('.tsv', '_synthetic.tsv'), sep='\t', index=False)
