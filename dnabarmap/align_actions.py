@@ -76,7 +76,7 @@ def compute_adjacency_score(seqs, refs, max_run):
 
 def find_best_rolls_batch(seqs, ref):
     # Parameters
-    max_run = 10
+    max_run = 5
     max_shift = seqs.shape[-2]
     min_shift = 0
     provided_range = np.arange(min_shift, max_shift + 1)
@@ -86,10 +86,8 @@ def find_best_rolls_batch(seqs, ref):
     n_strands, n_seqs, seq_len, seq_dim = seqs.shape
 
     # Precompute rolled sequences in one big array
-    # rolled_all = np.empty((n_strands, n_rolls, n_seqs, max_shift, seq_dim), dtype=seqs.dtype)
     rolled_all = np.empty((n_strands, n_rolls, n_seqs, ref.shape[-2], seq_dim), dtype=seqs.dtype)
     for idx, shift in enumerate(provided_range):
-        # rolled_all[:,idx] = np.roll(seqs, shift=shift, axis=2)[:, :, :ref.shape[-2]]
         rolled = np.roll(seqs, shift=-shift, axis=2)
         if shift > 0:
             rolled[:, :, -shift:] = 0  # zero out wrapped portion
@@ -97,7 +95,7 @@ def find_best_rolls_batch(seqs, ref):
 
     adjacency_matrix = compute_adjacency_score(rolled_all, ref[np.newaxis], max_run=max_run)
     adjacency_score = adjacency_matrix.sum(axis=(-1))
-    smoothed = gaussian_filter1d(adjacency_score, axis=-2, sigma=10)
+    smoothed = gaussian_filter1d(adjacency_score, axis=-2, sigma=1)
 
     # Pick best strand per sequence
     direction = np.argmax(np.max(smoothed, axis=1), axis=0)
