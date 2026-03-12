@@ -5,8 +5,8 @@ from shutil import rmtree
 
 from dnabarmap.array_align import align
 from dnabarmap.cluster import cluster, save_full_seqs
-from dnabarmap.consensus import determine_consensus_consecutive
 from dnabarmap.map import consensus_mapping
+from dnabarmap.consensus import determine_consensus_consecutive
 
 
 def main(**kwargs):
@@ -14,7 +14,7 @@ def main(**kwargs):
 
     initial_time = time.time()
     kwargs['id'] = round(kwargs['id'], 2)
-    kwargs['c'] = 0.75 #round(kwargs['id'], 2)
+    kwargs['c'] = 0.5
 
     # Extract and align barcodes using approximate alignment to degenerate reference
     print('Aligning barcodes...')
@@ -23,8 +23,8 @@ def main(**kwargs):
     align_time = time.time() - align_start_time
     print(f'Finished aligning and extracting barcodes in {round(align_time / 60, 1)} minutes\n')
 
-
-    # Cluster aligned barcodes using vsearch
+    # Cluster aligned barcodes using MMseqs2
+    # cluster() now combines batch files internally — no need to pass input_fa
     print('Clustering barcodes...')
     cluster_start_time = time.time()
     cluster(**kwargs)
@@ -32,7 +32,7 @@ def main(**kwargs):
     cluster_time = time.time() - cluster_start_time
     print(f'Finished clustering barcodes in {round(cluster_time / 60, 1)} minutes\n')
 
-    # Determine consensus seqeunces for clusters using minimap2 and racon
+    # Determine consensus sequences for clusters using minimap2 and medaka
     print('Determining consensus sequences...')
     consensus_start_time = time.time()
     determine_consensus_consecutive(**kwargs)
@@ -54,8 +54,8 @@ def main(**kwargs):
 def cli():
     parser = argparse.ArgumentParser()
 
-    # Directories and filenaemes
-    parser.add_argument('--input_fq', type=str, required=True, default=None)
+    # Directories and filenames
+    parser.add_argument('--input_fn', type=str, required=True, default=None)
     parser.add_argument("--mapping_fn", default=None, required=True,
                         help="Final mapping output filename")
 
@@ -69,23 +69,38 @@ def cli():
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument("--id", type=float, default=0.75, help="Value between 0 and 1 for "
-                                                                           "minimum identify between barcodes for clustering."
-                                                                           "Reccomended >0.75, but can be reduced for small "
-                                                                            "libraries or extra long barcodes")
+    parser.add_argument("--id", type=float, default=0.75,
+                        help="Minimum sequence identity for clustering (0-1). "
+                             "Recommended >0.75, can be reduced for small libraries, deep sequencing, "
+                             "or extra long barcodes.")
     parser.add_argument("--min_sequences", type=int, default=20,
-                        help="Minimum num_sequences for cluster to be valid >= /"
-                             "aim for at least 3x the expected depth")
+                        help="Minimum num_sequences for cluster to be valid. "
+                             "Aim for at least 3x the expected depth.")
     parser.add_argument("--threads", type=int, default=8,
                         help="Number of threads for clustering")
 
+    # Consensus parameters
+    parser.add_argument("--medaka_model", type=str,
+                        default="r1041_e82_400bps_sup_v5.0.0",
+                        help="Medaka model string, or 'none' to skip polishing")
+    parser.add_argument("--max_mismatches", type=int, default=5,
+                        help="Max substitution errors for barcode snapping")
+    parser.add_argument("--max_indels", type=int, default=3,
+                        help="Max indels for barcode snapping")
+    parser.add_argument("--min_window_score", type=float, default=0.7,
+                        help="Min fraction matching template to accept barcode region")
+
     parser.add_argument("--save_intermediate_files", default=True, action='store_true',
-                        help="Should not delete intermediate files generated during DNABARMAP")
+                        help="Keep intermediate files generated during DNABARMAP")
     parser.add_argument("--synthetic_data_available", default=False, action='store_true',
-                        help="Run comparisons to true values using synthetic data to validate functionality/accuracy")
+                        help="Run comparisons to true values using synthetic data")
 
     all_args = parser.parse_known_args()
     args = all_args[0]
+
+    args.input_fq = args.input_fn.replace('.pkl', '.fastq')
+    if args.synthetic_data_available:
+        assert args.input_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
 
     # Set up directories and filenames
     args.barcode_directory = 'barcode_' + args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
@@ -98,15 +113,12 @@ def cli():
     args.barcodes_fn = args.base_fn + '_barcodes.fasta'  # used in array_align
     args.output_mapping_fn = 'DNABARMAP_outputs/' + args.base_fn.split('/')[-1] + '_mapping.tsv'
 
-    if args.synthetic_data_available:
-        assert args.input_fq.endswith('.pkl'), 'Must provide pkl format for synthetic data'
-
     if args.left_coding_flank is None:
         args.left_coding_flank = ''
     if args.right_coding_flank is None:
         args.right_coding_flank = ''
 
-    # remove previous iterations
+    # Remove previous iterations
     if path.exists(args.cluster_dir):
         rmtree(args.cluster_dir)
     if path.exists(args.consensus_dir):
@@ -114,25 +126,26 @@ def cli():
     if path.exists(args.output_dir):
         rmtree(args.output_dir)
 
-    if args.synthetic_data_available:
-        assert args.input_fq.endswith('.pkl'), 'Must provide pkl format for synthetic data'
     if args.min_sequences < 10:
-        print('WARNING: min_sequences is less than 10, this is not recommended and may cause inaccurate consensus sequence determination')
+        print('WARNING: min_sequences is less than 10, this is not recommended '
+              'and may cause inaccurate consensus sequence determination')
 
-    makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
-    makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)
+    makedirs(args.cluster_dir + '/barcodes/', exist_ok=True)
+    makedirs(args.cluster_dir + '/full_seqs/', exist_ok=True)
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
-    args.output_fn = 'temp/'+args.input_fq.split('/')[-1].split('.')[0] + '_barcodes.fasta'
+    # output_fn is only used by array_align for per-batch barcode output
+    args.output_fn = args.output_dir + args.input_fq.split('/')[-1].split('.')[0] + '_barcodes.fasta'
     args.reoriented_fn = args.input_fq.replace('.fastq', '_reoriented.fastq')
 
-    args.seq_limit_for_debugging = None # 10000
+    args.seq_limit_for_debugging = None
 
     main(**vars(args))
 
     if not args.save_intermediate_files:
         rmtree('temp/')
+
 
 if __name__ == '__main__':
     cli()

@@ -210,9 +210,9 @@ def cli():
     parser.add_argument('--ks', type=int, default=[2,3,4,5,6,7,8,9,10], nargs='+',
 
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
-    parser.add_argument('--initial_designs', type=int, default=200,
+    parser.add_argument('--initial_designs', type=int, default=500,
                         help='How many times to try optimizing different barcode templates')
-    parser.add_argument('--opt_frac', type=float, default=0.2,
+    parser.add_argument('--opt_frac', type=float, default=0.25,
                         help='How many times to try optimizing different barcode templates')
     parser.add_argument('--no_gquad', default=False, action='store_true',
                         help='Eliminate the possiblility of G quadraplexes by not allowing 3 consecutive gs'

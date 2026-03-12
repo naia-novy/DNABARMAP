@@ -95,7 +95,7 @@ def find_best_rolls_batch(seqs, ref):
 
     adjacency_matrix = compute_adjacency_score(rolled_all, ref[np.newaxis], max_run=max_run)
     adjacency_score = adjacency_matrix.sum(axis=(-1))
-    smoothed = gaussian_filter1d(adjacency_score, axis=-2, sigma=1)
+    smoothed = gaussian_filter1d(adjacency_score, axis=-2, sigma=3)
 
     # Pick best strand per sequence
     direction = np.argmax(np.max(smoothed, axis=1), axis=0)

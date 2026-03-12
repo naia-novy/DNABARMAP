@@ -177,7 +177,7 @@ def cli():
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
-                        default='TGAAMNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBNCGGT',
+                        default='VHKNSHDKSYRRSHDVYHDVBMKHDMBKVWBKMBNDMKKMKVVHKMKVHBKMNKHVDBMKVYBKMBSWBVHKMKWN',
                         help='Reference degenerate barcode to align sequences to')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
@@ -190,7 +190,7 @@ def cli():
                         help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
     parser.add_argument('--right_coding_flank', type=str, default='ATGCGTA',
                         help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/syndataB')
+    parser.add_argument('--fn', type=str, default='syndata/syndata')
 
     args = parser.parse_args()
 

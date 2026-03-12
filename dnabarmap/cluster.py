@@ -6,7 +6,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
 from glob import glob
 from dnabarmap.utils import import_cupy_numpy
-from os import makedirs, path
+from os import makedirs, path, remove
 import argparse
 import time
 from shutil import rmtree
@@ -47,6 +47,10 @@ def create_hp_compressed_fasta(input_fasta, output_fasta):
             n_records += 1
     return n_records, n_changed
 
+
+# ═════════════════════════════════════════════════════════════════
+# FILE DISCOVERY
+# ═════════════════════════════════════════════════════════════════
 
 # ═════════════════════════════════════════════════════════════════
 # CLUSTER PARSING AND SAVING
@@ -92,17 +96,88 @@ def parse_cluster_tsv(tsv_path, input_fasta, min_sequences, output_dir):
           f'({reads_in_passing_clusters / total_reads * 100:.1f}%).')
 
 
-def cluster(input_fn, reoriented_fn, min_sequences, threads, id, c, output_dir,
+def _find_barcode_fasta(output_dir, output_fn=None):
+    """
+    Locate the barcode FASTA produced by align().
+    Checks output_fn first (if provided), then searches output_dir.
+    """
+    # If run.py passed output_fn, check it directly
+    if output_fn and path.exists(output_fn):
+        return output_fn
+
+    # Search output_dir recursively for barcode FASTAs
+    candidates = sorted(Path(output_dir).rglob('*_barcodes.fasta'))
+    candidates = [f for f in candidates if f.name != 'combined_barcodes.fasta'
+                  and 'hp_compressed' not in f.name
+                  and 'clusters' not in str(f)]
+
+    if len(candidates) == 1:
+        return str(candidates[0])
+    elif len(candidates) > 1:
+        # Multiple batch files — combine them
+        combined = f'{output_dir}/combined_barcodes.fasta'
+        print(f"  Found {len(candidates)} barcode files, combining...")
+        with open(combined, 'wb') as out:
+            for f in candidates:
+                with open(f, 'rb') as inp:
+                    shutil.copyfileobj(inp, out)
+        return combined
+    else:
+        raise FileNotFoundError(
+            f"No *_barcodes.fasta files found in {output_dir}. "
+            f"Did the align step complete successfully?"
+        )
+
+
+def _find_reoriented_fastq(output_dir, input_fq=None, reoriented_fn=None):
+    """
+    Locate the reoriented FASTQ produced by align().
+
+    Check order:
+      1. Explicit reoriented_fn from kwargs (lives next to input file)
+      2. Search inside output_dir
+      3. Fall back to original input FASTQ
+    """
+    # 1. Check the explicit path from run.py (e.g., syndata_reoriented.fastq)
+    if reoriented_fn and path.exists(reoriented_fn):
+        return reoriented_fn
+
+    # 2. Search output_dir
+    candidates = sorted(Path(output_dir).rglob('*_reoriented.fastq'))
+    candidates = [f for f in candidates if 'combined_' not in f.name
+                  and 'clusters' not in str(f)]
+
+    if len(candidates) == 1:
+        return str(candidates[0])
+    elif len(candidates) > 1:
+        combined = f'{output_dir}/combined_reoriented.fastq'
+        print(f"  Found {len(candidates)} reoriented files, combining...")
+        with open(combined, 'wb') as out:
+            for f in candidates:
+                with open(f, 'rb') as inp:
+                    shutil.copyfileobj(inp, out)
+        return combined
+
+    # 3. Fall back to original input
+    if input_fq and path.exists(input_fq):
+        print(f"  No reoriented FASTQ found, using original input: {input_fq}")
+        return input_fq
+    raise FileNotFoundError(
+        f"No *_reoriented.fastq found in {output_dir} and no input_fq fallback. "
+        f"Did the align step complete successfully?"
+    )
+
+
+def cluster(min_sequences, threads, id, c, output_dir,
             hp_compress=True, **kwargs):
     """
     Cluster barcode sequences using MMseqs2.
 
+    Automatically locates the barcode FASTA and reoriented FASTQ produced
+    by the align step, wherever they are in output_dir.
+
     Parameters:
     -----------
-    input_fn : str
-        Path to combined barcode FASTA (original, uncompressed sequences)
-    reoriented_fn : str
-        Path to combined reoriented FASTQ
     min_sequences : int
         Minimum cluster size
     threads : int
@@ -115,38 +190,33 @@ def cluster(input_fn, reoriented_fn, min_sequences, threads, id, c, output_dir,
         Output directory
     hp_compress : bool
         If True, HP-compress barcodes before clustering to handle nanopore
-        homopolymer errors. The original (uncompressed) sequences are preserved
-        in the output cluster files. (default=True)
+        homopolymer errors. Original sequences are preserved in output.
     """
 
-    # Combine reoriented files
-    input_files = list(Path(f'{output_dir}/aligned').rglob('*_reoriented.fastq'))
-    input_files = [i for i in input_files if 'combined_' not in str(i)]
-    with open(reoriented_fn, 'wb') as outfile:
-        for fasta in input_files:
-            with open(fasta, 'rb') as infile:
-                shutil.copyfileobj(infile, outfile)
+    # ── Find the barcode and reoriented files from align step ────
+    barcode_fasta = _find_barcode_fasta(output_dir, kwargs.get('output_fn'))
+    reoriented_fastq = _find_reoriented_fastq(output_dir, kwargs.get('input_fq'),
+                                              kwargs.get('reoriented_fn'))
 
-    # Combine barcodes
-    input_files = list(Path(f'{output_dir}/aligned').rglob('*_barcodes.fasta'))
-    input_files = [i for i in input_files if 'combined_' not in str(i)]
-    with open(input_fn, 'wb') as outfile:
-        for fasta in input_files:
-            with open(fasta, 'rb') as infile:
-                shutil.copyfileobj(infile, outfile)
+    print(f"  Barcode FASTA: {barcode_fasta}")
+    print(f"  Reoriented FASTQ: {reoriented_fastq}")
+
+    # Store these so save_full_seqs can find them
+    kwargs['_barcode_fasta'] = barcode_fasta
+    kwargs['_reoriented_fastq'] = reoriented_fastq
 
     # ── HP-compress barcodes for clustering ──────────────────────
     if hp_compress:
-        compressed_fn = input_fn.replace('.fasta', '_hp_compressed.fasta')
-        print("HP-compressing barcodes for clustering...")
-        n_records, n_changed = create_hp_compressed_fasta(input_fn, compressed_fn)
+        compressed_fn = f'{output_dir}/barcodes_hp_compressed.fasta'
+        print("  HP-compressing barcodes for clustering...")
+        n_records, n_changed = create_hp_compressed_fasta(barcode_fasta, compressed_fn)
         print(f"  {n_records:,} barcodes, {n_changed:,} modified by HP compression "
               f"({100 * n_changed / max(n_records, 1):.1f}%)")
         clustering_input = compressed_fn
     else:
-        clustering_input = input_fn
+        clustering_input = barcode_fasta
 
-    # Use a proper temp directory under output_dir so it gets cleaned up
+    # ── Run MMseqs2 ──────────────────────────────────────────────
     tmp_dir = tempfile.mkdtemp(dir=output_dir, prefix='mmseqs_tmp_')
     cluster_prefix = f'{output_dir}/clusters/barcodes/cluster-result'
 
@@ -155,19 +225,19 @@ def cluster(input_fn, reoriented_fn, min_sequences, threads, id, c, output_dir,
             'mmseqs',
             'easy-cluster',
             '--threads', str(threads),
-            '--kmer-per-seq', '25',
+            '--kmer-per-seq', '100',
             '--cluster-steps', '2',
-            '--cluster-reassign', '0',
+            '--cluster-reassign', '1',
             '--max-iterations', '10',
             '--alignment-mode', '2',
-            '--cluster-mode', '0',
+            '--cluster-mode', '1',
             '--min-seq-id', str(id),
             '-c', str(c),
-            '-k', '10',
+            '-k', '5',
             '--similarity-type', '1',
             '--remove-tmp-files', '1',
             '--cov-mode', '0',
-            clustering_input,  # HP-compressed or original
+            clustering_input,
             cluster_prefix,
             tmp_dir,
         ]
@@ -183,16 +253,14 @@ def cluster(input_fn, reoriented_fn, min_sequences, threads, id, c, output_dir,
             raise subprocess.CalledProcessError(result.returncode, cmd)
 
     finally:
-        # Clean up temp dir even if mmseqs fails
         if path.exists(tmp_dir):
             rmtree(tmp_dir, ignore_errors=True)
 
     # Clean up compressed file
     if hp_compress and path.exists(compressed_fn):
-        from os import remove
         remove(compressed_fn)
 
-    # Parse the TSV output — uses ORIGINAL (uncompressed) barcodes
+    # ── Parse TSV using ORIGINAL (uncompressed) barcodes ─────────
     tsv_path = f'{cluster_prefix}_cluster.tsv'
     if not path.exists(tsv_path):
         raise FileNotFoundError(
@@ -200,14 +268,20 @@ def cluster(input_fn, reoriented_fn, min_sequences, threads, id, c, output_dir,
             f"Check mmseqs output files at {cluster_prefix}_*"
         )
 
-    parse_cluster_tsv(tsv_path, input_fn, min_sequences, output_dir)
+    parse_cluster_tsv(tsv_path, barcode_fasta, min_sequences, output_dir)
 
 
-def save_full_seqs(reoriented_fn, output_dir, **kwargs):
+def save_full_seqs(output_dir, **kwargs):
     """Write full FASTQ records for each cluster using disk-backed indexing."""
-    print("Indexing full FASTQ…")
-    # SeqIO.index is disk-backed / lazy — handles millions of reads without blowing RAM
-    fastq_records = SeqIO.index(reoriented_fn, "fastq")
+    # Find the reoriented FASTQ — use cached path from cluster() if available,
+    # otherwise search for it
+    reoriented = kwargs.get('_reoriented_fastq')
+    if not reoriented or not path.exists(reoriented):
+        reoriented = _find_reoriented_fastq(output_dir, kwargs.get('input_fq'),
+                                            kwargs.get('reoriented_fn'))
+
+    print(f"Indexing full FASTQ: {reoriented}")
+    fastq_records = SeqIO.index(reoriented, "fastq")
     print(f"Indexed {len(fastq_records):,} reads from full FASTQ")
 
     cluster_fastas = glob(f"{output_dir}/clusters/barcodes/*/cluster_*.fasta")
@@ -273,12 +347,12 @@ def cli():
     parser.add_argument('--output_dir', type=str, default=None, required=True)
 
     # Cluster parameters
-    parser.add_argument("--id", type=float, default=0.8,
+    parser.add_argument("--id", type=float, default=0.75,
                         help="Minimum sequence identity for clustering (0-1). "
-                             "Recommended >0.75, can be reduced for small libraries "
+                             "Recommended >0.75, can be reduced for small libraries, deep sequencing, "
                              "or extra long barcodes.")
-    parser.add_argument("-c", type=float, default=0.8,
-                        help="Minimum coverage for clustering (0-1).")
+    parser.add_argument("-c", type=float, default=0.25,
+                        help="Minimum coverage for clustering (0-1). Low because we already extracted the correct region")
     parser.add_argument("--min_sequences", type=int, default=10,
                         help="Minimum number of sequences for a valid cluster. "
                              "Aim for at least 3x the expected depth.")
@@ -302,8 +376,6 @@ def cli():
     # Set up directories and filenames
     args.cluster_dir = args.output_dir + '/clusters/'
     args.consensus_dir = args.output_dir + '/consensus/'
-    args.reoriented_fn = f'{args.output_dir}/aligned/combined_reoriented.fastq'
-    args.input_fn = f'{args.output_dir}/aligned/combined_barcodes.fasta'
 
     # Remove previous iteration
     if path.exists(args.cluster_dir):

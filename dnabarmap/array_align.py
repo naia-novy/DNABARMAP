@@ -105,21 +105,21 @@ def report_alignment_result(best_sequences, reference_array, data, seq_limit_for
         plt.show()
 
 
-def count_total_sequences(input_fq):
+def count_total_sequences(input_fn):
     """Count total sequences in a file without loading them all into memory."""
-    if input_fq.endswith('.pkl'):
-        data = pd.read_pickle(input_fq)
+    if input_fn.endswith('.pkl'):
+        data = pd.read_pickle(input_fn)
         return len(data.synthetic_sequence)
-    elif input_fq.endswith('.fastq'):
+    elif input_fn.endswith('.fastq'):
         count = 0
-        with open(input_fq, 'r') as f:
+        with open(input_fn, 'r') as f:
             for line in f:
                 count += 1
         return count // 4
-    elif input_fq.endswith('.fastq.gz'):
+    elif input_fn.endswith('.fastq.gz'):
         import gzip
         count = 0
-        with gzip.open(input_fq, 'rt') as f:
+        with gzip.open(input_fn, 'rt') as f:
             for line in f:
                 count += 1
         return count // 4
@@ -127,15 +127,15 @@ def count_total_sequences(input_fq):
         raise ValueError('Input file must be either a .pkl, .fastq, or .fastq.gz file')
 
 
-def load_data_chunk(input_fq, start, chunk_size, seq_limit_for_debugging):
+def load_data_chunk(input_fn, start, chunk_size, seq_limit_for_debugging):
     """Load a chunk of sequences from the input file.
 
     Returns sequences, headers, data, and the actual number of sequences loaded.
     """
     end = start + chunk_size
 
-    if input_fq.endswith('.pkl'):
-        data = pd.read_pickle(input_fq)
+    if input_fn.endswith('.pkl'):
+        data = pd.read_pickle(input_fn)
         total = len(data.synthetic_sequence)
         if seq_limit_for_debugging is not None:
             total = min(total, seq_limit_for_debugging)
@@ -146,10 +146,10 @@ def load_data_chunk(input_fq, start, chunk_size, seq_limit_for_debugging):
         headers = None
         return sequences, headers, data, len(sequences)
 
-    elif input_fq.endswith('.fastq'):
+    elif input_fn.endswith('.fastq'):
         sequences = []
         headers = []
-        with open(input_fq, 'r') as f:
+        with open(input_fn, 'r') as f:
             seq_idx = 0
             line_in_record = 0
             current_header = None
@@ -172,11 +172,11 @@ def load_data_chunk(input_fq, start, chunk_size, seq_limit_for_debugging):
                 line_in_record = (line_in_record + 1) % 4
         return sequences, headers, None, len(sequences)
 
-    elif input_fq.endswith('.fastq.gz'):
+    elif input_fn.endswith('.fastq.gz'):
         import gzip
         sequences = []
         headers = []
-        with gzip.open(input_fq, 'rt') as f:
+        with gzip.open(input_fn, 'rt') as f:
             seq_idx = 0
             line_in_record = 0
             current_header = None
@@ -203,16 +203,16 @@ def load_data_chunk(input_fq, start, chunk_size, seq_limit_for_debugging):
         raise ValueError('Input file must be either a .pkl, .fastq, or .fastq.gz file')
 
 
-def load_data(input_fq, seq_limit_for_debugging, batch_size):
+def load_data(input_fn, seq_limit_for_debugging, batch_size):
     """Load all data at once (kept for backward compatibility)."""
-    if input_fq.endswith('.fastq'):
-        sequences, headers = read_fastq(input_fq, seq_limit_for_debugging)
+    if input_fn.endswith('.fastq'):
+        sequences, headers = read_fastq(input_fn, seq_limit_for_debugging)
         data = None
-    elif input_fq.endswith('.fastq.gz'):
-        sequences, headers = read_fastqgz(input_fq, seq_limit_for_debugging)
+    elif input_fn.endswith('.fastq.gz'):
+        sequences, headers = read_fastqgz(input_fn, seq_limit_for_debugging)
         data = None
-    elif input_fq.endswith('.pkl'):
-        data = pd.read_pickle(input_fq)
+    elif input_fn.endswith('.pkl'):
+        data = pd.read_pickle(input_fn)
         if seq_limit_for_debugging is None:
             seq_limit_for_debugging = len(data.synthetic_sequence)
         assert batch_size <= seq_limit_for_debugging
@@ -229,16 +229,16 @@ def load_data(input_fq, seq_limit_for_debugging, batch_size):
     return sequences, headers, data, seq_limit_for_debugging
 
 
-def align(input_fq, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
+def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_size, barcode_template,
           synthetic_data_available, extra,
           **kwargs):
 
-    assert os.path.exists(input_fq)
+    assert os.path.exists(input_fn)
     if synthetic_data_available:
-        assert input_fq.endswith('.pkl')
+        assert input_fn.endswith('.pkl')
 
     # Count total sequences to process
-    total_sequences = count_total_sequences(input_fq)
+    total_sequences = count_total_sequences(input_fn)
     if seq_limit_for_debugging is not None:
         total_sequences = min(total_sequences, seq_limit_for_debugging)
 
@@ -259,7 +259,7 @@ def align(input_fq, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
 
         # Load this chunk
         sequences, headers, data, n_loaded = load_data_chunk(
-            input_fq, chunk_start, MEGA_BATCH_SIZE, seq_limit_for_debugging)
+            input_fn, chunk_start, MEGA_BATCH_SIZE, seq_limit_for_debugging)
 
         if n_loaded == 0:
             break
@@ -304,14 +304,14 @@ def align(input_fq, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
 
     # Save all alignments
     print(f'\nWriting {len(all_passed_seqs)} total passing sequences...')
-    write_full_fastq(all_passed_seqs, all_directions, output_fn, input_fq, reoriented_fn)
+    write_full_fastq(all_passed_seqs, all_directions, output_fn, input_fn, reoriented_fn)
 
 
 def cli():
     global MEGA_BATCH_SIZE
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_fq', type=str, default=None, required=True)
+    parser.add_argument('--input_fn', type=str, default=None, required=True)
     parser.add_argument('--barcode_template', type=str, required=True,
                         help='Reference degenerate barcode to align sequences to')
 
@@ -341,7 +341,7 @@ def cli():
         pr.enable()
 
 
-    args.barcode_directory = 'barcode_' + args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
+    args.barcode_directory = 'barcode_' + args.input_fn.split('/barcode')[-1].split('/')[0].split('_')[0]
     args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
     args.output_dir = f'temp/{args.barcode_directory}/'
     args.cluster_dir = args.output_dir + '/clusters/'
@@ -349,8 +349,9 @@ def cli():
     args.aligned_dir = args.output_dir + '/aligned/'
     args.extra = 3
 
-    args.output_fn = args.aligned_dir + path.basename(Path(args.input_fq)).replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
-    args.reoriented_fn = args.aligned_dir + path.basename(Path(args.input_fq)).replace('.fastq', '_reoriented.fastq')
+    args.output_fn = args.aligned_dir + path.basename(Path(args.input_fn)).replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
+    print(args.input_fn, args.output_fn)
+    args.reoriented_fn = args.aligned_dir + path.basename(Path(args.input_fn)).replace('.fastq', '_reoriented.fastq')
 
     makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
     makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)

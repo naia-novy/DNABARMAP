@@ -1,0 +1,12 @@
+# Align
+for v in syndata/syndata*.fastq ;  do     [[ $v == *_reoriented.fastq ]] && continue;  echo align --input_fq $v --barcode_template HVVKWRSHRVYVRSMWSRDMSRHMBRDMBRNYVRBMRYRVBMKVDMSRSMSRMSMRVYDV ; done > align.txt
+
+# Cluster
+echo cluster --id 0.8 --min_sequences 20 --input_fn syndata/syndata_barcodes.fasta --output_dir temp/syndata/ > cluster.txt
+
+# Consensus
+find temp/syndata/clusters/full_seqs/* -type f -name "*.fastq" | awk -v n=50 '{cmd="consensus --medaka_model r941_min_hac_g507 --barcode_template HVVKWRSHRVYVRSMWSRDMSRHMBRDMBRNYVRBMRYRVBMKVDMSRSMSRMSMRVYDV --input_fq "$0; batch=(NR-1)%n==0 ? cmd : batch"; "cmd} NR%n==0{print batch; batch=""} END{if(batch!="")print batch}' > consensus_batched.txt
+
+# Map
+mkdir mapping
+echo map --mapping_fn mapping/syndata_mapping.tsv --consensus_dir temp/syndata/consensus --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG --barcode_template HVVKWRSHRVYVRSMWSRDMSRHMBRDMBRNYVRBMRYRVBMKVDMSRSMSRMSMRVYDV > map.txt

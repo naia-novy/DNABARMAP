@@ -463,6 +463,61 @@ def determine_consensus(threads, input_fq, medaka_model,
     if path.isdir(medaka_dir):
         shutil.rmtree(medaka_dir, ignore_errors=True)
 
+def determine_consensus_consecutive(output_dir, threads=8,
+                                     medaka_model='none',
+                                     barcode_template=None,
+                                     max_mismatches=5, max_indels=3,
+                                     min_window_score=0.7, **kwargs):
+    """
+    Iterate over all cluster FASTQ files in full_seqs/ and generate
+    a consensus for each one.
+    """
+    # Normalize output_dir to avoid double-slash issues
+    output_dir = output_dir.rstrip('/')
+
+    # Search recursively under full_seqs for cluster FASTQs
+    full_seqs_dir = f"{output_dir}/clusters/full_seqs"
+    cluster_files = sorted(glob(f"{full_seqs_dir}/**/*.fastq", recursive=True))
+
+    if not cluster_files:
+        # Also try without subdirectories in case structure is flat
+        cluster_files = sorted(glob(f"{full_seqs_dir}/*.fastq"))
+
+    if not cluster_files:
+        print(f"  WARNING: No cluster FASTQ files found in {full_seqs_dir}/")
+        return
+
+    print(f"  Found {len(cluster_files)} clusters to process")
+
+    if medaka_model and medaka_model.lower() != "none":
+        _get_medaka_interface()
+
+    succeeded = 0
+    failed = 0
+    for i, cluster_fq in enumerate(cluster_files):
+        cluster_id = Path(cluster_fq).stem
+
+        if (i + 1) % 50 == 0 or i == 0:
+            print(f"  Processing cluster {i + 1}/{len(cluster_files)}: {cluster_id}")
+
+        try:
+            determine_consensus(
+                threads=threads,
+                input_fq=cluster_fq,
+                medaka_model=medaka_model,
+                barcode_template=barcode_template,
+                max_mismatches=max_mismatches,
+                max_indels=max_indels,
+                min_window_score=min_window_score,
+            )
+            succeeded += 1
+        except Exception as e:
+            print(f"  ERROR on cluster {cluster_id}: {e}")
+            failed += 1
+            continue
+
+    print(f"  Consensus complete: {succeeded} succeeded, {failed} failed")
+
 
 # ═════════════════════════════════════════════════════════════════
 # CLI
