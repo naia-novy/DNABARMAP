@@ -81,7 +81,7 @@ def cli():
 
     # Consensus parameters
     parser.add_argument("--medaka_model", type=str,
-                        default="r1041_e82_400bps_sup_v5.0.0",
+                        default="none",
                         help="Medaka model string, or 'none' to skip polishing")
     parser.add_argument("--max_mismatches", type=int, default=5,
                         help="Max substitution errors for barcode snapping")
@@ -90,8 +90,6 @@ def cli():
     parser.add_argument("--min_window_score", type=float, default=0.7,
                         help="Min fraction matching template to accept barcode region")
 
-    parser.add_argument("--save_intermediate_files", default=True, action='store_true',
-                        help="Keep intermediate files generated during DNABARMAP")
     parser.add_argument("--synthetic_data_available", default=False, action='store_true',
                         help="Run comparisons to true values using synthetic data")
 
@@ -103,9 +101,9 @@ def cli():
         assert args.input_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
 
     # Set up directories and filenames
-    args.barcode_directory = 'barcode_' + args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
+    args.barcode_directory = args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
     args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
-    args.output_dir = f'temp/{args.barcode_directory}/'
+    args.output_dir = f'{args.barcode_directory}/'
     args.cluster_dir = args.output_dir + '/clusters/'
     args.consensus_dir = args.output_dir + 'consensus/'
 
@@ -132,19 +130,18 @@ def cli():
 
     makedirs(args.cluster_dir + '/barcodes/', exist_ok=True)
     makedirs(args.cluster_dir + '/full_seqs/', exist_ok=True)
+    makedirs(args.output_dir + '/aligned/', exist_ok=True)
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)
 
     # output_fn is only used by array_align for per-batch barcode output
-    args.output_fn = args.output_dir + args.input_fq.split('/')[-1].split('.')[0] + '_barcodes.fasta'
-    args.reoriented_fn = args.input_fq.replace('.fastq', '_reoriented.fastq')
+    args.output_fn = args.output_dir + 'aligned/' + args.input_fq.split('/')[-1].split('.')[0] + '_barcodes.fasta'
+    args.reoriented_fn = args.output_fn.replace('barcodes.fasta', 'reoriented.fastq')
 
     args.seq_limit_for_debugging = None
 
     main(**vars(args))
 
-    if not args.save_intermediate_files:
-        rmtree('temp/')
 
 
 if __name__ == '__main__':

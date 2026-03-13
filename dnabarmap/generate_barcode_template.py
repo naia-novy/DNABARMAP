@@ -29,9 +29,6 @@ def could_form_homopolymer(template, max_homopolymer_len):
 
 def adjust_p(p):
     return p
-    adj_p = (1/p)
-
-    return adj_p
 
 def calculate_mean_p(template, adjust=True):
     obs = []
@@ -48,8 +45,8 @@ def calculate_mean_p(template, adjust=True):
     else:
         return p
 
-def score_template(template, k):
-    return expanded_motif_penalty(template, k), calculate_mean_p(template)
+def score_template(template, ks):
+    return expanded_motif_penalty(template, ks), calculate_mean_p(template)
 
 
 def dominates(a: tuple, b: tuple) -> bool:
@@ -63,6 +60,8 @@ def pareto_front(candidates: list) -> list:
     return front
 
 def pick_elbow_candidate(pareto_candidates: list) -> tuple:
+    if len(pareto_candidates) == 1:
+        return pareto_candidates[0]
     # Prepare points: sort by penalty ascending
     pts = sorted(pareto_candidates, key=lambda x: x[1][1])
     # Convert to numeric arrays
@@ -207,38 +206,75 @@ def cli():
                         help='Do not allow sequences with possible homopolymers longer than this value')
     parser.add_argument('--iterations', type=int, default=1000,
                         help='Simulated annealing iterations for each barcode template')
-    parser.add_argument('--ks', type=int, default=[2,3,4,5,6,7,8,9,10], nargs='+',
-
+    parser.add_argument('--ks', type=int, default=[2,3,4,5], nargs='+',
                         help='size of windows to look over to assess sequence diversity/repetitiveness')
     parser.add_argument('--initial_designs', type=int, default=500,
                         help='How many times to try optimizing different barcode templates')
     parser.add_argument('--opt_frac', type=float, default=0.25,
                         help='How many times to try optimizing different barcode templates')
     parser.add_argument('--no_gquad', default=False, action='store_true',
-                        help='Eliminate the possiblility of G quadraplexes by not allowing 3 consecutive gs'
+                        help='Eliminate the possiblility of G quadraplexes by not allowing 3 consecutive gs. '
                              'This is mostly important for RNA barcodes')
+    parser.add_argument('--allow_fixed_bases', default=False, action='store_true',
+                        help='Allow templates that contain fixed (non-degenerate) bases. '
+                             'By default, only fully degenerate templates are returned.')
 
     args = parser.parse_args()
 
     candidates = optimize_barcode_template(**vars(args))
-    pareto_candidates = pareto_front(candidates)
-    best_candidates = sorted(pareto_candidates, key=lambda x: x[1][0]*x[1][1])
-    filtered_candidates = [(i[0], (adjust_p(i[1][0]), i[1][1]))  for i in best_candidates if all([n not in i[0] for n in nucleotides])]
 
-    # print('Full filtered: \n', filtered_candidates)
-    # print(f'Best candidate: {filtered_candidates[0][0], filtered_candidates[0][1]}')
+    # Diagnostics
+    print(f"\n  Optimization returned {len(candidates)} candidates")
+
+    pareto_candidates = pareto_front(candidates)
+    print(f"  Pareto front: {len(pareto_candidates)} candidates")
+
+    best_candidates = sorted(pareto_candidates, key=lambda x: x[1][0] * x[1][1])
+
+    # Filter to fully-degenerate templates (no fixed A/C/G/T) unless --allow_fixed_bases
+    if args.allow_fixed_bases:
+        filtered_candidates = [(i[0], (i[1][0], i[1][1])) for i in best_candidates]
+    else:
+        filtered_candidates = [(i[0], (i[1][0], i[1][1]))
+                               for i in best_candidates
+                               if all(n not in i[0] for n in nucleotides)]
+
+    print(f"  After filtering: {len(filtered_candidates)} candidates")
+
+    if not filtered_candidates:
+        print("\n  WARNING: No candidates passed filtering!")
+        print("  This can happen when ks values make it hard to find fully-degenerate templates.")
+        print("  Try: --allow_fixed_bases, or increase --initial_designs, or adjust --ks")
+
+        # Fall back to all pareto candidates so we at least show something
+        if best_candidates:
+            print(f"  Falling back to all {len(best_candidates)} pareto candidates for plotting\n")
+            filtered_candidates = [(i[0], (i[1][0], i[1][1])) for i in best_candidates]
+        else:
+            print("  No candidates at all — check parameters.")
+            return
 
     x = [i[1][0] for i in filtered_candidates]
     y = [i[1][1] for i in filtered_candidates]
-    sns.scatterplot(x=x, y=y)
-    plt.ylabel('K-mer Repetitiveness (minimize)')
-    plt.xlabel('Mean Degeneracy (maximize)')
-    plt.title('Barcode Template Pareto Front')
-    plt.show()
+
+    fig, ax = plt.subplots()
+    sns.scatterplot(x=x, y=y, ax=ax)
+    ax.set_ylabel('K-mer Repetitiveness (minimize)')
+    ax.set_xlabel('Mean Degeneracy (maximize)')
+    ax.set_title('Barcode Template Pareto Front')
+
+    plot_fn = 'barcode_pareto_front.png'
+    fig.savefig(plot_fn, dpi=150, bbox_inches='tight')
+    print(f"\n  Plot saved to {plot_fn}")
+
+    try:
+        plt.show()
+    except Exception:
+        pass
 
     elbow_candidate = pick_elbow_candidate(filtered_candidates)
-    # print(f'Optimized degenerate barcode template: {elbow_candidate[0], elbow_candidate[1]}')
     print(f'Optimized degenerate barcode template: {elbow_candidate[0]}')
+    print(f'  Score: penalty={elbow_candidate[1][0]:.4f}, degeneracy={elbow_candidate[1][1]:.4f}')
 
 if __name__ == '__main__':
     cli()

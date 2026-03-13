@@ -312,6 +312,8 @@ def cli():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_fn', type=str, default=None, required=True)
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='Output directory. If not set, derived from input filename.')
     parser.add_argument('--barcode_template', type=str, required=True,
                         help='Reference degenerate barcode to align sequences to')
 
@@ -340,21 +342,39 @@ def cli():
         pr = cProfile.Profile()
         pr.enable()
 
+    # Derive output_dir if not explicitly provided
+    if args.output_dir is None:
+        args.barcode_directory = args.input_fn.split('/barcode')[-1].split('/')[0].split('_')[0]
+        args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
+        args.output_dir = f'{args.barcode_directory}/'
 
-    args.barcode_directory = 'barcode_' + args.input_fn.split('/barcode')[-1].split('/')[0].split('_')[0]
-    args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
-    args.output_dir = f'temp/{args.barcode_directory}/'
-    args.cluster_dir = args.output_dir + '/clusters/'
-    args.consensus_dir = args.output_dir + '/consensus/'
-    args.aligned_dir = args.output_dir + '/aligned/'
+    # Ensure trailing slash for consistency
+    if not args.output_dir.endswith('/'):
+        args.output_dir += '/'
+
+    args.cluster_dir = args.output_dir + 'clusters/'
+    args.consensus_dir = args.output_dir + 'consensus/'
+    args.aligned_dir = args.output_dir + 'aligned/'
     args.extra = 3
 
-    args.output_fn = args.aligned_dir + path.basename(Path(args.input_fn)).replace('.pkl', '_barcodes.fasta').replace('.fastq', '_barcodes.fasta')
-    print(args.input_fn, args.output_fn)
-    args.reoriented_fn = args.aligned_dir + path.basename(Path(args.input_fn)).replace('.fastq', '_reoriented.fastq')
+    # Strip all common sequence extensions, then add the output suffix
+    input_basename = path.basename(args.input_fn)
+    for ext in ['.fastq.gz', '.fastq', '.pkl']:
+        if input_basename.endswith(ext):
+            input_stem = input_basename[:-len(ext)]
+            break
+    else:
+        input_stem = input_basename
 
-    makedirs(args.cluster_dir+'/barcodes/', exist_ok=True)
-    makedirs(args.cluster_dir+'/full_seqs/', exist_ok=True)
+    args.output_fn = args.aligned_dir + input_stem + '_barcodes.fasta'
+    args.reoriented_fn = args.aligned_dir + input_stem + '_reoriented.fastq'
+
+    print(f'Input: {args.input_fn}')
+    print(f'Output dir: {args.output_dir}')
+    print(f'Barcode output: {args.output_fn}')
+
+    makedirs(args.cluster_dir + 'barcodes/', exist_ok=True)
+    makedirs(args.cluster_dir + 'full_seqs/', exist_ok=True)
     makedirs(args.aligned_dir, exist_ok=True)
     makedirs(args.consensus_dir, exist_ok=True)
     makedirs('DNABARMAP_outputs', exist_ok=True)

@@ -351,11 +351,11 @@ def run_medaka(input_reads, draft_fasta, output_dir, model, threads):
 # CONSENSUS GENERATION
 # ═════════════════════════════════════════════════════════════════
 
-def determine_consensus(threads, input_fq, medaka_model,
+def determine_consensus(threads, input_fn, medaka_model,
                         barcode_template=None, max_mismatches=5, max_indels=3,
                         min_window_score=0.7):
-    cluster_id = input_fq.split(".")[0].split('/')[-1]
-    consensus_dir = input_fq.split('clusters')[0] + '/consensus/'
+    cluster_id = input_fn.split(".")[0].split('/')[-1]
+    consensus_dir = input_fn.split('clusters')[0] + '/consensus/'
     sub_dir = consensus_dir + cluster_id[-2:]
     medaka_dir = f"{sub_dir}/{cluster_id}_medaka"
 
@@ -370,7 +370,7 @@ def determine_consensus(threads, input_fq, medaka_model,
     try:
         subprocess.run(
             ["minimap2", "-x", "map-ont", "-t", str(threads),
-             input_fq, input_fq],
+             input_fn, input_fn],
             stdout=open(paf_file, "w"),
             check=True,
             timeout=TIMEOUT
@@ -393,7 +393,7 @@ def determine_consensus(threads, input_fq, medaka_model,
 
     best_read_id = max(read_counts, key=read_counts.get)
 
-    for record in SeqIO.parse(input_fq, "fastq"):
+    for record in SeqIO.parse(input_fn, "fastq"):
         if record.id == best_read_id:
             SeqIO.write(record, draft_fasta, "fasta")
             break
@@ -402,7 +402,7 @@ def determine_consensus(threads, input_fq, medaka_model,
     if medaka_model and medaka_model.lower() != "none":
         try:
             polished = run_medaka(
-                input_reads=input_fq,
+                input_reads=input_fn,
                 draft_fasta=draft_fasta,
                 output_dir=medaka_dir,
                 model=medaka_model,
@@ -481,7 +481,7 @@ def determine_consensus_consecutive(output_dir, threads=8,
 
     if not cluster_files:
         # Also try without subdirectories in case structure is flat
-        cluster_files = sorted(glob(f"{full_seqs_dir}/*.fastq"))
+        cluster_files = sorted(glob(f"{full_seqs_dir}/*/*.fastq"))
 
     if not cluster_files:
         print(f"  WARNING: No cluster FASTQ files found in {full_seqs_dir}/")
@@ -503,7 +503,7 @@ def determine_consensus_consecutive(output_dir, threads=8,
         try:
             determine_consensus(
                 threads=threads,
-                input_fq=cluster_fq,
+                input_fn=cluster_fq,
                 medaka_model=medaka_model,
                 barcode_template=barcode_template,
                 max_mismatches=max_mismatches,
@@ -525,13 +525,21 @@ def determine_consensus_consecutive(output_dir, threads=8,
 
 def cli():
     parser = argparse.ArgumentParser(
-        description="Generate consensus: minimap2 draft -> Medaka -> barcode snap"
+        description="Generate consensus: minimap2 draft -> Medaka -> barcode snap. "
+                    "Provide --output_dir to process all clusters, or --input_fn for a single cluster."
     )
-    parser.add_argument('--input_fq', required=True)
+
+    # Mutually exclusive: batch vs single
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--output_dir', type=str, default=None,
+                      help='Directory containing clusters/ — processes ALL clusters')
+    mode.add_argument('--input_fn', type=str, default=None,
+                      help='Single cluster FASTQ file to process')
+
+    # Shared parameters
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--medaka_model", type=str,
-                        default="r941_min_high_g360")
-
+                        default="none")
     parser.add_argument("--barcode_template", type=str, default=None,
                         help="Degenerate barcode template (IUPAC codes). "
                              "If provided, the consensus is scanned for the "
@@ -551,9 +559,6 @@ def cli():
     global TIMEOUT
     TIMEOUT = args.timeout
 
-    if args.medaka_model.lower() != "none":
-        _get_medaka_interface()
-
     if args.barcode_template:
         print(f"Barcode template snapping: ON")
         print(f"  Template:  {args.barcode_template[:40]}... ({len(args.barcode_template)}bp)")
@@ -561,18 +566,31 @@ def cli():
         print(f"  Min window score: {args.min_window_score}")
 
     print(f"Timeout: {TIMEOUT}s ({TIMEOUT / 3600:.1f}h)")
-    print("Determining consensus...")
     start = time.time()
 
-    determine_consensus(
-        threads=args.threads,
-        input_fq=args.input_fq,
-        medaka_model=args.medaka_model,
-        barcode_template=args.barcode_template,
-        max_mismatches=args.max_mismatches,
-        max_indels=args.max_indels,
-        min_window_score=args.min_window_score,
-    )
+    if args.output_dir:
+        print(f"Processing all clusters in {args.output_dir}...")
+        determine_consensus_consecutive(
+            output_dir=args.output_dir,
+            threads=args.threads,
+            medaka_model=args.medaka_model,
+            barcode_template=args.barcode_template,
+            max_mismatches=args.max_mismatches,
+            max_indels=args.max_indels,
+            min_window_score=args.min_window_score,
+        )
+    else:
+        # Single cluster mode
+        print(f"Determining consensus for {args.input_fn}...")
+        determine_consensus(
+            threads=args.threads,
+            input_fn=args.input_fn,
+            medaka_model=args.medaka_model,
+            barcode_template=args.barcode_template,
+            max_mismatches=args.max_mismatches,
+            max_indels=args.max_indels,
+            min_window_score=args.min_window_score,
+        )
 
     print(f"Done in {round(time.time() - start, 2)}s")
 

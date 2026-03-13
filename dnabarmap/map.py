@@ -191,7 +191,6 @@ def reverse_complement(seq):
     }
     return ''.join(complement[b] for b in reversed(seq.upper()))
 
-
 def make_orientation_matchers(barcode_template, left_coding_flank, right_coding_flank,
                               left_fuzz, right_fuzz, bar_fuzz):
     barcode_regex = build_degenerate_regex(barcode_template)
@@ -200,21 +199,36 @@ def make_orientation_matchers(barcode_template, left_coding_flank, right_coding_
     left_flank_rc = reverse_complement(left_coding_flank)
     right_flank_rc = reverse_complement(right_coding_flank)
 
-    # Forward orientation: left_flank(coding)right_flank...barcode
+    # --- Barcode RIGHT of coding region ---
+    # Forward: left_flank(coding)right_flank...barcode
     regex_A = (
         fr"(?:{left_coding_flank}){{e<={left_fuzz}}}(?P<coding>[ATCGN]*)(?:{right_coding_flank}){{e<={right_fuzz}}}"
         fr"[ATCGN]*(?P<barcode>{barcode_regex}){{s<={bar_fuzz}}}"
     )
-
-    # Reverse orientation: barcode_rc...right_flank_rc(coding)left_flank_rc
+    # Reverse complement of A: barcode_rc...right_flank_rc(coding)left_flank_rc
     regex_B = (
         fr"(?P<barcode>{barcode_regex_rc}){{s<={bar_fuzz}}}[ATCGN]*"
         fr"(?:{right_flank_rc}){{e<={right_fuzz}}}(?P<coding>[ATCGN]*)(?:{left_flank_rc}){{e<={left_fuzz}}}"
     )
 
-    return [(regex_A, 'barcode', 'coding', 'A'), (regex_B, 'barcode', 'coding', 'B')]
+    # --- Barcode LEFT of coding region ---
+    # Forward: barcode...left_flank(coding)right_flank
+    regex_C = (
+        fr"(?P<barcode>{barcode_regex}){{s<={bar_fuzz}}}"
+        fr"[ATCGN]*(?:{left_coding_flank}){{e<={left_fuzz}}}(?P<coding>[ATCGN]*)(?:{right_coding_flank}){{e<={right_fuzz}}}"
+    )
+    # Reverse complement of C: left_flank_rc(coding)right_flank_rc...barcode_rc
+    regex_D = (
+        fr"(?:{left_flank_rc}){{e<={left_fuzz}}}(?P<coding>[ATCGN]*)(?:{right_flank_rc}){{e<={right_fuzz}}}"
+        fr"[ATCGN]*(?P<barcode>{barcode_regex_rc}){{s<={bar_fuzz}}}"
+    )
 
-
+    return [
+        (regex_A, 'barcode', 'coding', 'A'),
+        (regex_B, 'barcode', 'coding', 'B'),
+        (regex_C, 'barcode', 'coding', 'A'),
+        (regex_D, 'barcode', 'coding', 'B'),
+    ]
 def match_with_orientation(seq, matchers, orientation_counts):
     sorted_matchers = sorted(matchers, key=lambda m: orientation_counts.get(m[3], 0), reverse=True)
     other_key = {'A': 'B', 'B': 'A'}

@@ -85,10 +85,14 @@ Flanks must be adapted according to your construct. These flanks correspond to t
 dnabarmap can also be run all at once or step-wise using the commands align, cluster, consensus, and map. Reccomended usage for full control and speed is to use commands sequentially
 
 ex all at once:
-dnabarmap
+ dnabarmap --input_fn synthetic_datasets/syndata.pkl --mapping_fn mapped_barcodes.tsv --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG --min_sequences 25 --save_intermediate_files --synthetic_data_available --id 0.5
 
 ex sequentially:
-
+align --input_fn synthetic_datasets/syndata.pkl --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD  --output_dir syndata
+cluster --input_fn synthetic_datasets/syndata.pkl --output_dir syndata/ --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD --min_sequences 20  --id 0.5
+consensus --output_dir syndata/ --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD
+map --consensus_dir syndata/consensus/ --mapping_fn mapped_barcodes.tsv --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG
+s
 
 CLI help
 --------

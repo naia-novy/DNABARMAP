@@ -2,8 +2,6 @@ import subprocess
 import tempfile
 import re
 from Bio import SeqIO
-from Bio.SeqRecord import SeqRecord
-from Bio.Seq import Seq
 from glob import glob
 from dnabarmap.utils import import_cupy_numpy
 from os import makedirs, path, remove
@@ -102,8 +100,10 @@ def _find_barcode_fasta(output_dir, output_fn=None):
     Checks output_fn first (if provided), then searches output_dir.
     """
     # If run.py passed output_fn, check it directly
+    output_dir = output_dir + '/aligned/'
     if output_fn and path.exists(output_fn):
         return output_fn
+
 
     # Search output_dir recursively for barcode FASTAs
     candidates = sorted(Path(output_dir).rglob('*_barcodes.fasta'))
@@ -233,10 +233,10 @@ def cluster(min_sequences, threads, id, c, output_dir,
             '--cluster-mode', '1',
             '--min-seq-id', str(id),
             '-c', str(c),
-            '-k', '5',
-            '--similarity-type', '1',
+            '-k', '4',
+            '--gap-open', "1",
+            '-e', '0.01',
             '--remove-tmp-files', '1',
-            '--cov-mode', '0',
             clustering_input,
             cluster_prefix,
             tmp_dir,
