@@ -85,14 +85,13 @@ Flanks must be adapted according to your construct. These flanks correspond to t
 dnabarmap can also be run all at once or step-wise using the commands align, cluster, consensus, and map. Reccomended usage for full control and speed is to use commands sequentially
 
 ex all at once:
- dnabarmap --input_fn synthetic_datasets/syndata.pkl --mapping_fn mapped_barcodes.tsv --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG --min_sequences 25 --save_intermediate_files --synthetic_data_available --id 0.5
-
+dnabarmap --input_fn synthetic_datasets/syndata.pkl --mapping_fn mapped_barcodes.tsv --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG --min_sequences 25 --id 0.5 --medaka_model r1041_e82_400bps_hac_v5.0.0
 ex sequentially:
-align --input_fn synthetic_datasets/syndata.pkl --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD  --output_dir syndata
-cluster --input_fn synthetic_datasets/syndata.pkl --output_dir syndata/ --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD --min_sequences 20  --id 0.5
-consensus --output_dir syndata/ --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD
-map --consensus_dir syndata/consensus/ --mapping_fn mapped_barcodes.tsv --barcode_template VDVYRDWBRHKVWBNMRBNWRBHVKNHRKHRWBNRHKHVKSHDDSYNDRYDRDYRBKWVD --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG
-s
+align --input_fn synthetic_datasets/syndata.fastq --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN  --output_dir syndata
+cluster --input_fn synthetic_datasets/syndata.fastq --output_dir syndata/ --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN --min_sequences 20  --id 0.5
+consensus --output_dir syndata/ --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN   --medaka_model r1041_e82_400bps_hac_v5.0.0  
+map --consensus_dir syndata/consensus/ --mapping_fn mapped_barcodes.tsv --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG
+
 
 CLI help
 --------
@@ -130,6 +129,9 @@ Li, H. (2018). Minimap2: pairwise alignment for nucleotide sequences. Bioinforma
 
 pbsim3:
 Yukiteru Ono, Michiaki Hamada, Kiyoshi Asai, PBSIM3: a simulator for all types of PacBio and ONT long reads, NAR Genomics and Bioinformatics, Volume 4, Issue 4, December 2022, lqac092, https://doi.org/10.1093/nargab/lqac092
+
+samtools:
+Heng Li, Bob Handsaker, Alec Wysoker, Tim Fennell, Jue Ruan, Nils Homer, Gabor Marth, Goncalo Abecasis, Richard Durbin, 1000 Genome Project Data Processing Subgroup, The Sequence Alignment/Map format and SAMtools, Bioinformatics, Volume 25, Issue 16, August 2009, Pages 2078–2079, https://doi.org/10.1093/bioinformatics/btp352
 
 medaka:
 https://github.com/nanoporetech/medaka

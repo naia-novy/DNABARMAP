@@ -5,7 +5,7 @@ import csv
 from Bio import SeqIO
 from os.path import isdir
 from pathlib import Path
-from collections import defaultdict
+from collections import Counter, defaultdict
 import argparse
 import time
 
@@ -125,21 +125,23 @@ def load_references_from_file(ref_path, seq_col=None, name_col=None):
 
     if ext in ('.fa', '.fasta', '.fna'):
         return {r.id: str(r.seq).upper() for r in SeqIO.parse(ref_path, "fasta")}
-
-    if ext == '.csv':
-        delimiter = ','
-    elif ext in ('.tsv', '.tab'):
-        delimiter = '\t'
-    else:
-        with open(ref_path) as f:
-            sample = f.read(4096)
-        try:
-            delimiter = csv.Sniffer().sniff(sample).delimiter
-        except csv.Error:
-            delimiter = '\t'
-
     import pandas as pd
-    df = pd.read_csv(ref_path, sep=delimiter)
+    if ext == '.pkl':
+        df = pd.read_pickle(ref_path)
+    else:
+        if ext == '.csv':
+            delimiter = ','
+        elif ext in ('.tsv', '.tab'):
+            delimiter = '\t'
+        else:
+            with open(ref_path) as f:
+                sample = f.read(4096)
+            try:
+                delimiter = csv.Sniffer().sniff(sample).delimiter
+            except csv.Error:
+                delimiter = '\t'
+
+        df = pd.read_csv(ref_path, sep=delimiter)
 
     if seq_col and seq_col in df.columns:
         s_col = seq_col
@@ -163,14 +165,18 @@ def load_references_from_file(ref_path, seq_col=None, name_col=None):
     )
 
     refs = {}
+    seen_sequences = {}
     for i, row in df.iterrows():
         seq = str(row[s_col]).upper().strip()
         if not seq or seq == 'NAN':
+            continue
+        if seq in seen_sequences:
             continue
         name = str(row[n_col]) if n_col else f"ref_{i}"
         if name in refs:
             name = f"{name}_{i}"
         refs[name] = seq
+        seen_sequences[seq] = name
 
     return refs
 
@@ -190,6 +196,251 @@ def reverse_complement(seq):
         'N': 'N'
     }
     return ''.join(complement[b] for b in reversed(seq.upper()))
+
+
+def _template_match_fraction(subseq, template):
+    if len(subseq) != len(template) or not template:
+        return 0.0
+    matches = 0
+    for base, code in zip(subseq.upper(), template.upper()):
+        if base in nuc_dict[code]:
+            matches += 1
+    return matches / len(template)
+
+
+def _find_best_barcode_window(seq, barcode_template):
+    template = barcode_template.upper()
+    best = None
+
+    for orientation, work_seq in (('fwd', seq.upper()), ('rc', reverse_complement(seq))):
+        if len(work_seq) < len(template):
+            continue
+        for start in range(len(work_seq) - len(template) + 1):
+            end = start + len(template)
+            score = _template_match_fraction(work_seq[start:end], template)
+            if best is None or score > best['score']:
+                best = {
+                    'orientation': orientation,
+                    'work_seq': work_seq,
+                    'start': start,
+                    'end': end,
+                    'score': score,
+                }
+
+    return best
+
+
+def _find_exact_positions(seq, motif):
+    positions = []
+    start = 0
+    while True:
+        pos = seq.find(motif, start)
+        if pos < 0:
+            break
+        positions.append(pos)
+        start = pos + 1
+    return positions
+
+
+def _collect_flank_candidates(seq, motif, start_min=0, start_max=None,
+                              max_edits=2, preferred_start=None, limit=5):
+    motif = motif.upper()
+    seq = seq.upper()
+    motif_len = len(motif)
+    if motif_len == 0 or len(seq) < motif_len:
+        return []
+
+    start_min = max(0, start_min)
+    max_valid_start = len(seq) - motif_len
+    if start_max is None:
+        start_max = max_valid_start
+    else:
+        start_max = min(start_max, max_valid_start)
+    if start_min > start_max:
+        return []
+
+    candidates = []
+    for pos in _find_exact_positions(seq, motif):
+        if start_min <= pos <= start_max:
+            candidates.append((pos, 0))
+
+    if candidates:
+        return sorted(
+            candidates,
+            key=lambda item: (item[1], abs(item[0] - (preferred_start if preferred_start is not None else item[0])))
+        )[:limit]
+
+    for pos in range(start_min, start_max + 1):
+        window = seq[pos:pos + motif_len]
+        edits = _edit_distance_banded(window, motif, max_dist=max_edits)
+        if edits <= max_edits:
+            candidates.append((pos, edits))
+
+    candidates.sort(
+        key=lambda item: (item[1], abs(item[0] - (preferred_start if preferred_start is not None else item[0])))
+    )
+    return candidates[:limit]
+
+
+def _best_reference_match(query_seq, refs_by_len, max_dist=60):
+    best = None
+    second_best = None
+    query_len = len(query_seq)
+
+    for ref_len, ref_group in refs_by_len.items():
+        if abs(ref_len - query_len) > max_dist:
+            continue
+        for name, ref_seq in ref_group:
+            dist = _edit_distance_banded(query_seq, ref_seq, max_dist=max_dist)
+            if dist > max_dist:
+                continue
+            candidate = (dist, name, ref_seq)
+            if best is None or dist < best[0]:
+                second_best = best
+                best = candidate
+            elif second_best is None or dist < second_best[0]:
+                second_best = candidate
+
+    if best is None:
+        return None
+
+    return {
+        'dist': best[0],
+        'name': best[1],
+        'seq': best[2],
+        'second_dist': second_best[0] if second_best is not None else None,
+    }
+
+
+def _extract_with_reference_guidance(seq, barcode_template, left_coding_flank,
+                                     right_coding_flank, refs_by_len,
+                                     max_edits_full=5):
+    barcode_hit = _find_best_barcode_window(seq, barcode_template)
+    if barcode_hit is None or barcode_hit['score'] < 0.72:
+        return None
+
+    work_seq = barcode_hit['work_seq']
+    barcode_start = barcode_hit['start']
+    barcode_end = barcode_hit['end']
+    barcode = work_seq[barcode_start:barcode_end]
+
+    left_len = len(left_coding_flank)
+    right_len = len(right_coding_flank)
+    max_barcode_gap = 260
+    max_shift = 30
+    max_flank_edits = max(3, max(len(left_coding_flank), len(right_coding_flank)) // 3)
+    max_ref_dist = max(max_edits_full, 25)
+    best = None
+
+    def consider_candidate(coding_start, coding_end, left_edits, right_edits,
+                           barcode_gap, delta):
+        nonlocal best
+        if coding_start < 0 or coding_end <= coding_start or coding_end > len(work_seq):
+            return
+        coding_region = work_seq[coding_start:coding_end]
+        ref_match = _best_reference_match(coding_region, refs_by_len, max_dist=max_ref_dist)
+        if ref_match is None:
+            return
+
+        score = (
+            ref_match['dist'],
+            left_edits + right_edits,
+            abs(delta),
+            barcode_gap,
+        )
+        if best is None or score < best['score']:
+            best = {
+                'barcode': barcode,
+                'coding_region': coding_region,
+                'ref_match': ref_match,
+                'score': score,
+            }
+
+    # Barcode ... left_flank [coding] right_flank
+    left_candidates = _collect_flank_candidates(
+        work_seq,
+        left_coding_flank,
+        start_min=barcode_end,
+        start_max=min(len(work_seq) - left_len, barcode_end + max_barcode_gap),
+        max_edits=max_flank_edits,
+        preferred_start=barcode_end,
+        limit=5,
+    )
+    for left_start, left_edits in left_candidates:
+        coding_start = left_start + left_len
+        for ref_len in sorted(refs_by_len):
+            for delta in range(-max_shift, max_shift + 1):
+                coding_end = coding_start + ref_len + delta
+                if coding_end + right_len > len(work_seq):
+                    continue
+                right_window = work_seq[coding_end:coding_end + right_len]
+                right_edits = _edit_distance_banded(
+                    right_window,
+                    right_coding_flank,
+                    max_dist=max_flank_edits,
+                )
+                if right_edits <= max_flank_edits:
+                    consider_candidate(
+                        coding_start,
+                        coding_end,
+                        left_edits,
+                        right_edits,
+                        left_start - barcode_end,
+                        delta,
+                    )
+
+    # left_flank [coding] right_flank ... barcode
+    right_candidates = _collect_flank_candidates(
+        work_seq,
+        right_coding_flank,
+        start_min=max(0, barcode_start - max_barcode_gap),
+        start_max=barcode_start,
+        max_edits=max_flank_edits,
+        preferred_start=barcode_start,
+        limit=5,
+    )
+    for right_start, right_edits in right_candidates:
+        for ref_len in sorted(refs_by_len):
+            for delta in range(-max_shift, max_shift + 1):
+                coding_end = right_start
+                coding_start = coding_end - (ref_len + delta)
+                left_start = coding_start - left_len
+                if left_start < 0:
+                    continue
+                left_window = work_seq[left_start:left_start + left_len]
+                left_edits = _edit_distance_banded(
+                    left_window,
+                    left_coding_flank,
+                    max_dist=max_flank_edits,
+                )
+                if left_edits <= max_flank_edits:
+                    consider_candidate(
+                        coding_start,
+                        coding_end,
+                        left_edits,
+                        right_edits,
+                        barcode_start - right_start,
+                        delta,
+                    )
+
+    if best is None:
+        return None
+
+    ref_match = best['ref_match']
+    second_dist = ref_match.get('second_dist')
+    if ref_match['dist'] > max_ref_dist:
+        return None
+    if second_dist is not None and second_dist - ref_match['dist'] < 2:
+        return None
+
+    return {
+        'barcode': best['barcode'],
+        'coding_region': ref_match['seq'],
+        'orientation': 'A',
+        'ref_name': ref_match['name'],
+        'snapped': True,
+    }
+
 
 def make_orientation_matchers(barcode_template, left_coding_flank, right_coding_flank,
                               left_fuzz, right_fuzz, bar_fuzz):
@@ -256,6 +507,102 @@ def build_degenerate_regex(template):
     return pattern
 
 
+def _find_motif_candidates(seq, motif, max_mismatches, start=0, end=None):
+    seq = seq.upper()
+    motif = motif.upper()
+    motif_len = len(motif)
+    if motif_len == 0 or len(seq) < motif_len:
+        return []
+
+    stop = len(seq) if end is None else min(len(seq), end)
+    candidates = []
+    for pos in range(max(0, start), max(0, stop - motif_len + 1)):
+        window = seq[pos:pos + motif_len]
+        mismatches = sum(a != b for a, b in zip(window, motif))
+        if mismatches <= max_mismatches:
+            candidates.append((pos, mismatches))
+    return candidates
+
+
+def _infer_cluster_fastq(consensus_file):
+    consensus_path = Path(consensus_file)
+    full_seq_parts = []
+    replaced = False
+    for part in consensus_path.parts:
+        if part == 'consensus' and not replaced:
+            full_seq_parts.extend(['clusters', 'full_seqs'])
+            replaced = True
+        else:
+            full_seq_parts.append(part)
+
+    if not replaced:
+        return None
+
+    cluster_fastq = Path(*full_seq_parts)
+    cluster_fastq = cluster_fastq.with_name(cluster_fastq.name.replace('_consensus.fasta', '.fastq'))
+    return cluster_fastq if cluster_fastq.exists() else None
+
+
+def _infer_reference_from_cluster_reads(consensus_file, left_coding_flank,
+                                        right_coding_flank, refs_by_len,
+                                        max_flank_mismatches=3,
+                                        max_ref_dist=160):
+    cluster_fastq = _infer_cluster_fastq(consensus_file)
+    if cluster_fastq is None:
+        return None
+
+    votes = Counter()
+    informative = 0
+    left_len = len(left_coding_flank)
+    right_len = len(right_coding_flank)
+
+    for record in SeqIO.parse(str(cluster_fastq), "fastq"):
+        seq = str(record.seq).upper()
+        left_candidates = _find_motif_candidates(seq, left_coding_flank, max_flank_mismatches)
+        right_candidates = _find_motif_candidates(seq, right_coding_flank, max_flank_mismatches)
+        if not left_candidates or not right_candidates:
+            continue
+
+        best_pair = None
+        for left_pos, left_mm in left_candidates:
+            for right_pos, right_mm in right_candidates:
+                coding_len = right_pos - (left_pos + left_len)
+                if coding_len < 200:
+                    continue
+                tail_len = len(seq) - (right_pos + right_len)
+                pair_score = (
+                    left_mm + right_mm,
+                    abs(tail_len),
+                    -coding_len,
+                )
+                if best_pair is None or pair_score < best_pair[0]:
+                    best_pair = (pair_score, left_pos, right_pos)
+
+        if best_pair is None:
+            continue
+
+        _, left_pos, right_pos = best_pair
+        coding_region = seq[left_pos + left_len:right_pos]
+        ref_match = _best_reference_match(coding_region, refs_by_len, max_dist=max_ref_dist)
+        if ref_match is None:
+            continue
+
+        informative += 1
+        votes[ref_match['seq']] += 1
+
+    if informative == 0 or not votes:
+        return None
+
+    ranked = votes.most_common(2)
+    top_seq, top_count = ranked[0]
+    second_count = ranked[1][1] if len(ranked) > 1 else 0
+
+    if top_count < max(3, second_count + 2):
+        return None
+
+    return top_seq
+
+
 # ═════════════════════════════════════════════════════════════════
 # MAPPING
 # ═════════════════════════════════════════════════════════════════
@@ -306,11 +653,15 @@ def map_barcodes(left_fuzz, right_fuzz, bar_fuzz,
 
     # ── Load reference index if provided ─────────────────────────
     hp_index = None
+    refs_by_len = None
     if reference_seqs:
         print(f"Loading reference sequences from {reference_seqs}...")
         refs = load_references_from_file(reference_seqs, seq_col=ref_seq_col, name_col=ref_name_col)
         print(f"  Loaded {len(refs)} reference sequences")
         hp_index = build_reference_index(refs)
+        refs_by_len = defaultdict(list)
+        for name, ref_seq in refs.items():
+            refs_by_len[len(ref_seq)].append((name, ref_seq))
         print(f"  Reference snapping: ON "
               f"(max_edits_compressed={max_edits_compressed}, max_edits_full={max_edits_full})")
     else:
@@ -344,16 +695,33 @@ def map_barcodes(left_fuzz, right_fuzz, bar_fuzz,
         for file in sorted(consensus_files):
             for record in SeqIO.parse(file, file.split('.')[-1]):
                 seq = str(record.seq).upper()
-                barcode, coding_region, orientation_counts, orientation = match_with_orientation(
-                    seq, matchers, orientation_counts
-                )
+                guided = None
+                if refs_by_len is not None:
+                    guided = _extract_with_reference_guidance(
+                        seq,
+                        barcode_template,
+                        left_coding_flank,
+                        right_coding_flank,
+                        refs_by_len,
+                        max_edits_full=max_edits_full,
+                    )
+
+                if guided is not None:
+                    barcode = guided['barcode']
+                    coding_region = guided['coding_region']
+                    orientation = guided['orientation']
+                    snapped_count += 1
+                else:
+                    barcode, coding_region, orientation_counts, orientation = match_with_orientation(
+                        seq, matchers, orientation_counts
+                    )
                 if barcode:
                     if orientation == 'B':
                         barcode = reverse_complement(barcode)
                         coding_region = reverse_complement(coding_region)
 
                     # ── Snap coding region to nearest reference ───
-                    if hp_index is not None and coding_region:
+                    if hp_index is not None and coding_region and guided is None:
                         ref_name, ref_seq = snap_to_reference(
                             coding_region, hp_index,
                             max_edits_compressed=max_edits_compressed,
@@ -363,7 +731,19 @@ def map_barcodes(left_fuzz, right_fuzz, bar_fuzz,
                             coding_region = ref_seq
                             snapped_count += 1
                         else:
-                            no_snap_count += 1
+                            voted_ref = None
+                            if refs_by_len is not None:
+                                voted_ref = _infer_reference_from_cluster_reads(
+                                    file,
+                                    left_coding_flank,
+                                    right_coding_flank,
+                                    refs_by_len,
+                                )
+                            if voted_ref is not None:
+                                coding_region = voted_ref
+                                snapped_count += 1
+                            else:
+                                no_snap_count += 1
 
                     out.write(f"{file}\t{barcode}\t{coding_region}\n")
                 else:
@@ -415,9 +795,9 @@ def main():
         # Reference snapping args
         parser.add_argument("--reference_seqs", type=str, default=None,
                             help="Path to reference sequences (FASTA, CSV, or TSV) for coding "
-                                 "region snapping. If provided, extracted coding regions will be "
-                                 "replaced with the nearest reference sequence within edit distance "
-                                 "thresholds.")
+                             "region snapping. If provided, extracted coding regions will be "
+                             "replaced with the nearest reference sequence within edit distance "
+                             "thresholds.")
         parser.add_argument("--ref_seq_col", type=str, default=None,
                             help="Column name for sequences in reference CSV/TSV")
         parser.add_argument("--ref_name_col", type=str, default=None,

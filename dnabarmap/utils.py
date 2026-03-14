@@ -166,42 +166,62 @@ def reverse_complement(seq):
 
 
 def write_full_fastq(sequences, directions, barcode_fn, full_fn, filtered_fn):
-    # if synthetic data read from fastq for filtering
-    if full_fn.endswith('.pkl'):
-        full_fn = full_fn.replace('.pkl', '.fastq')
-
     # build index -> barcode mapping
     idx_to_barcode = {int(i): s for i, s in sequences}
 
     barcodes = []
     matched_records = []
-    for i, rec in enumerate(SeqIO.parse(full_fn, "fastq")):
-        if i in idx_to_barcode:
+    if full_fn.endswith('.pkl'):
+        # Synthetic PKLs are shuffled after the FASTQ is written, so positional
+        # indexing against the FASTQ mismatches barcodes to reads. Build the
+        # reoriented FASTQ directly from the pickle order instead.
+        data = pd.read_pickle(full_fn)
+        for i, seq in enumerate(data.synthetic_sequence.to_list()):
+            if i not in idx_to_barcode:
+                continue
             add_id = str(uuid.uuid4())[:6]
-            rec.id = add_id[:] + '-' + rec.id
-            if directions[i] == 1:  # reverse complement required
-                new_seq = Seq(reverse_complement(str(rec.seq))) # reverse complement sequence
-                new_quals = rec.letter_annotations["phred_quality"][::-1] # reverse quality scores
-                rec = SeqRecord(
-                    new_seq,
-                    id=rec.id,
-                    description="",
-                    letter_annotations={"phred_quality": new_quals})
-            else:
-                rec = SeqRecord(
-                    rec.seq,
-                    id=rec.id,
-                    description="",
-                    letter_annotations={"phred_quality": rec.letter_annotations["phred_quality"]})
-
+            rec_id = add_id[:] + '-' + str(i)
+            rec_seq = reverse_complement(seq) if directions[i] == 1 else seq
+            rec = SeqRecord(
+                Seq(rec_seq),
+                id=rec_id,
+                description="",
+                letter_annotations={"phred_quality": [40] * len(rec_seq)})
             matched_records.append(rec)
-
-            # write barcode fasta
-            barcode = SeqRecord(
+            barcodes.append(
+                SeqRecord(
                     Seq(idx_to_barcode[i]),
                     description="",
-                    id=rec.id)
-            barcodes.append(barcode)
+                    id=rec_id)
+            )
+    else:
+        for i, rec in enumerate(SeqIO.parse(full_fn, "fastq")):
+            if i in idx_to_barcode:
+                add_id = str(uuid.uuid4())[:6]
+                rec.id = add_id[:] + '-' + rec.id
+                if directions[i] == 1:  # reverse complement required
+                    new_seq = Seq(reverse_complement(str(rec.seq))) # reverse complement sequence
+                    new_quals = rec.letter_annotations["phred_quality"][::-1] # reverse quality scores
+                    rec = SeqRecord(
+                        new_seq,
+                        id=rec.id,
+                        description="",
+                        letter_annotations={"phred_quality": new_quals})
+                else:
+                    rec = SeqRecord(
+                        rec.seq,
+                        id=rec.id,
+                        description="",
+                        letter_annotations={"phred_quality": rec.letter_annotations["phred_quality"]})
+
+                matched_records.append(rec)
+
+                # write barcode fasta
+                barcode = SeqRecord(
+                        Seq(idx_to_barcode[i]),
+                        description="",
+                        id=rec.id)
+                barcodes.append(barcode)
 
     # write filtered full reads with qualities preserved
     SeqIO.write(matched_records, filtered_fn, "fastq")

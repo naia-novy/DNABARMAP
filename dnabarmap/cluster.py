@@ -225,17 +225,17 @@ def cluster(min_sequences, threads, id, c, output_dir,
             'mmseqs',
             'easy-cluster',
             '--threads', str(threads),
-            '--kmer-per-seq', '100',
-            '--cluster-steps', '2',
+            '--kmer-per-seq', '50',
+            '--cluster-steps', '1',
             '--cluster-reassign', '1',
-            '--max-iterations', '10',
-            '--alignment-mode', '2',
+            '--max-iterations', '50',
+            '--alignment-mode', '1',
             '--cluster-mode', '1',
             '--min-seq-id', str(id),
             '-c', str(c),
-            '-k', '4',
+            '-k', '10',
             '--gap-open', "1",
-            '-e', '0.01',
+            '-e', '0.05',
             '--remove-tmp-files', '1',
             clustering_input,
             cluster_prefix,
@@ -351,11 +351,10 @@ def cli():
                         help="Minimum sequence identity for clustering (0-1). "
                              "Recommended >0.75, can be reduced for small libraries, deep sequencing, "
                              "or extra long barcodes.")
-    parser.add_argument("-c", type=float, default=0.25,
+    parser.add_argument("-c", type=float, default=0.5,
                         help="Minimum coverage for clustering (0-1). Low because we already extracted the correct region")
     parser.add_argument("--min_sequences", type=int, default=10,
-                        help="Minimum number of sequences for a valid cluster. "
-                             "Aim for at least 3x the expected depth.")
+                        help="Minimum number of sequences for a valid cluster")
     parser.add_argument("--threads", type=int, default=8,
                         help="Number of threads for clustering.")
 

@@ -8,9 +8,14 @@ from os import makedirs, path
 from pathlib import Path
 
 from dnabarmap.align_actions import *
-from dnabarmap.utils import read_fastq, read_fastqgz, write_full_fastq, degenerate_nucleotide_mapping, reverse_complement
+from dnabarmap.utils import (read_fastq, read_fastqgz, write_full_fastq,
+                             degenerate_nucleotide_mapping, reverse_complement,
+                             nuc_dict)
 
 MEGA_BATCH_SIZE = 100_000  # Max sequences to load/process at a time
+ALIGN_MATCH_SCORE = 3
+ALIGN_MISMATCH_PENALTY = -3
+ALIGN_GAP_PENALTY = -4
 
 def decode_alignment(sequence, reference=None, extra=0):
     """Convert one-hot encoded sequence array or alignment back to nucleotide sequence."""
@@ -39,6 +44,104 @@ def decode_alignment(sequence, reference=None, extra=0):
     return decoded_sequences
 
 
+def _extract_coarse_window(sequence, roll, barcode_len, extra):
+    """Extract a fixed-width window around the coarse roll position."""
+    start = int(roll) - int(extra)
+    end = int(roll) + int(barcode_len) + int(extra)
+
+    left_pad = max(0, -start)
+    right_pad = max(0, end - len(sequence))
+    start = max(0, start)
+    end = min(len(sequence), end)
+
+    window = sequence[start:end]
+    if left_pad:
+        window = 'N' * left_pad + window
+    if right_pad:
+        window = window + 'N' * right_pad
+    return window
+
+
+def _align_window_to_template(window, barcode_template, template_allowed):
+    """
+    Semiglobally align a coarse barcode window to the degenerate template.
+    Returns a template-length normalized barcode plus query start/end.
+    """
+    template_len = len(barcode_template)
+    window_len = len(window)
+    neg_inf = -10 ** 9
+
+    scores = np.full((template_len + 1, window_len + 1), neg_inf, dtype=np.int32)
+    trace = np.zeros((template_len + 1, window_len + 1), dtype=np.int8)
+
+    scores[0, :] = 0  # free query prefix
+    for i in range(1, template_len + 1):
+        scores[i, 0] = scores[i - 1, 0] + ALIGN_GAP_PENALTY
+        trace[i, 0] = 1
+
+    for i in range(1, template_len + 1):
+        allowed = template_allowed[i - 1]
+        for j in range(1, window_len + 1):
+            query_base = window[j - 1]
+            diag = scores[i - 1, j - 1] + (
+                ALIGN_MATCH_SCORE if query_base in allowed else ALIGN_MISMATCH_PENALTY
+            )
+            up = scores[i - 1, j] + ALIGN_GAP_PENALTY
+            left = scores[i, j - 1] + ALIGN_GAP_PENALTY
+
+            best = diag
+            step = 0
+            if up > best:
+                best = up
+                step = 1
+            if left > best:
+                best = left
+                step = 2
+
+            scores[i, j] = best
+            trace[i, j] = step
+
+    end_j = int(np.argmax(scores[template_len, :]))
+    score = int(scores[template_len, end_j])
+    i = template_len
+    j = end_j
+    normalized = []
+
+    while i > 0:
+        step = trace[i, j] if j > 0 else 1
+        if step == 0:
+            normalized.append(window[j - 1])
+            i -= 1
+            j -= 1
+        elif step == 1:
+            normalized.append('N')
+            i -= 1
+        else:
+            j -= 1
+
+    normalized.reverse()
+    return ''.join(normalized), j, end_j, score
+
+
+def _normalize_barcode_window(window, barcode_template, extra, template_allowed):
+    """
+    Normalize the center barcode to template coordinates while preserving the
+    same amount of flanking context used by the original extractor.
+    """
+    normalized, start_j, end_j, score = _align_window_to_template(
+        window, barcode_template, template_allowed)
+
+    left_context = window[max(0, start_j - extra):start_j]
+    right_context = window[end_j:min(len(window), end_j + extra)]
+
+    if len(left_context) < extra:
+        left_context = 'N' * (extra - len(left_context)) + left_context
+    if len(right_context) < extra:
+        right_context = right_context + 'N' * (extra - len(right_context))
+
+    return left_context + normalized + right_context, score
+
+
 def initialize_sequences(sequences, barcode_template, data,
                          synthetic_data_available, seq_limit_for_debugging, batch_size, **kwargs):
     sequence_lengths = [len(i) for i in sequences]
@@ -58,7 +161,7 @@ def initialize_sequences(sequences, barcode_template, data,
     # Score top and bottom strand alignments to orient and approximately position sequences
     score_array = np.zeros((2, seq_stacked.shape[1]))
     directions = np.zeros(seq_stacked.shape[1], dtype=np.int32)
-    best_rolls = np.zeros(seq_stacked.shape[1])
+    best_rolls = np.zeros(seq_stacked.shape[1], dtype=np.int32)
     for batch_idx in range(0, seq_stacked.shape[1], batch_size):
         batch_end = min(batch_idx + batch_size, seq_stacked.shape[1])
 
@@ -80,7 +183,7 @@ def initialize_sequences(sequences, barcode_template, data,
         report_alignment_result(best_sequences[:, :reference_array.shape[-2]], reference_array, data, seq_limit_for_debugging,
                                 range(best_sequences.shape[0]))
 
-    return best_sequences, directions
+    return best_sequences, directions, best_rolls
 
 
 def report_alignment_result(best_sequences, reference_array, data, seq_limit_for_debugging, indices, plot=False, extra=0):
@@ -265,7 +368,7 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
             break
 
         # Initialize (orient + roll) sequences for this chunk
-        sequence_array, directions = initialize_sequences(
+        sequence_array, directions, best_rolls = initialize_sequences(
             sequences, barcode_template, data,
             synthetic_data_available, chunk_limit, batch_size)
 
@@ -282,10 +385,16 @@ def align(input_fn, output_fn, reoriented_fn, seq_limit_for_debugging, batch_siz
 
         threshold = 0
         passing_idxs = np.where(scores > threshold)[0]
+        length = reference_array.shape[-2]
+        template_allowed = [set(nuc_dict[base]) for base in barcode_template]
         for i in passing_idxs:
-            length = reference_array.shape[-2]
-            final_seq = np.concatenate((sequence_array[i, -extra:], sequence_array[i, :length+extra]))
-            decoded_seq = decode_alignment(final_seq)[0]
+            oriented_seq = sequences[i] if directions[i] == 0 else reverse_complement(sequences[i])
+            coarse_window = _extract_coarse_window(oriented_seq, best_rolls[i], length, extra)
+            decoded_seq, _ = _normalize_barcode_window(
+                coarse_window,
+                barcode_template,
+                extra,
+                template_allowed)
             # Use global index so write_full_fastq can find the right record
             all_passed_seqs.append((int(i + global_offset), decoded_seq))
 
@@ -327,6 +436,9 @@ def cli():
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--mega_batch_size', type=int, default=100_000,
                         help='Max sequences to load into memory at once (default: 100000)')
+    parser.add_argument('--extra', type=int, default=10,
+                        help='Number of bases of context to keep on each side of the '
+                             'aligned barcode for clustering (default: 10)')
 
     all_args = parser.parse_known_args()
     args = all_args[0]
@@ -355,8 +467,6 @@ def cli():
     args.cluster_dir = args.output_dir + 'clusters/'
     args.consensus_dir = args.output_dir + 'consensus/'
     args.aligned_dir = args.output_dir + 'aligned/'
-    args.extra = 3
-
     # Strip all common sequence extensions, then add the output suffix
     input_basename = path.basename(args.input_fn)
     for ext in ['.fastq.gz', '.fastq', '.pkl']:

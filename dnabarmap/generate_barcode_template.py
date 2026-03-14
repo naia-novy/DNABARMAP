@@ -274,7 +274,7 @@ def cli():
 
     elbow_candidate = pick_elbow_candidate(filtered_candidates)
     print(f'Optimized degenerate barcode template: {elbow_candidate[0]}')
-    print(f'  Score: penalty={elbow_candidate[1][0]:.4f}, degeneracy={elbow_candidate[1][1]:.4f}')
+    # print(f'  Score: penalty={elbow_candidate[1][1]:.4f}, degeneracy={elbow_candidate[1][0]:.4f}')
 
 if __name__ == '__main__':
     cli()

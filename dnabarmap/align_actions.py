@@ -121,4 +121,3 @@ def roll_batch(batch_array, roll_values):
         rolled[indices] = rolled_batch
 
     return rolled
-

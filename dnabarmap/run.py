@@ -6,11 +6,11 @@ from shutil import rmtree
 from dnabarmap.array_align import align
 from dnabarmap.cluster import cluster, save_full_seqs
 from dnabarmap.map import consensus_mapping
-from dnabarmap.consensus import determine_consensus_consecutive
+from dnabarmap.consensus import determine_consensus_parallel
 
 
 def main(**kwargs):
-    kwargs['extra'] = 10
+    kwargs['extra'] = kwargs.get('extra', 10)
 
     initial_time = time.time()
     kwargs['id'] = round(kwargs['id'], 2)
@@ -35,7 +35,7 @@ def main(**kwargs):
     # Determine consensus sequences for clusters using minimap2 and medaka
     print('Determining consensus sequences...')
     consensus_start_time = time.time()
-    determine_consensus_consecutive(**kwargs)
+    determine_consensus_parallel(**kwargs)
     consensus_time = time.time() - consensus_start_time
     print(f'Finished determining consensus sequences in {round(consensus_time / 60, 1)} minutes\n')
 
@@ -58,6 +58,9 @@ def cli():
     parser.add_argument('--input_fn', type=str, required=True, default=None)
     parser.add_argument("--mapping_fn", default=None, required=True,
                         help="Final mapping output filename")
+    parser.add_argument("--output_dir", type=str, default=None,
+                        help="Directory for intermediate pipeline outputs. "
+                             "Defaults to a directory next to the input file.")
 
     # Define barcode and sequence parameters
     parser.add_argument('--barcode_template', type=str, default=None, required=True,
@@ -74,8 +77,7 @@ def cli():
                              "Recommended >0.75, can be reduced for small libraries, deep sequencing, "
                              "or extra long barcodes.")
     parser.add_argument("--min_sequences", type=int, default=20,
-                        help="Minimum num_sequences for cluster to be valid. "
-                             "Aim for at least 3x the expected depth.")
+                        help="Minimum num_sequences for cluster to be valid.")
     parser.add_argument("--threads", type=int, default=8,
                         help="Number of threads for clustering")
 
@@ -89,6 +91,19 @@ def cli():
                         help="Max indels for barcode snapping")
     parser.add_argument("--min_window_score", type=float, default=0.7,
                         help="Min fraction matching template to accept barcode region")
+    parser.add_argument("--extra", type=int, default=10,
+                        help="Number of bases of context to keep on each side of the "
+                             "aligned barcode for clustering (default: 10)")
+    parser.add_argument("--reference_seqs", type=str, default=None,
+                        help="Optional reference sequences for coding-region snapping during mapping")
+    parser.add_argument("--ref_seq_col", type=str, default=None,
+                        help="Sequence column to use when --reference_seqs points to a table or pickle")
+    parser.add_argument("--ref_name_col", type=str, default=None,
+                        help="Name column to use when --reference_seqs points to a table or pickle")
+    parser.add_argument("--max_edits_compressed", type=int, default=3,
+                        help="Max edit distance in homopolymer-compressed space for reference snapping")
+    parser.add_argument("--max_edits_full", type=int, default=5,
+                        help="Max full-length edit distance for reference snapping")
 
     parser.add_argument("--synthetic_data_available", default=False, action='store_true',
                         help="Run comparisons to true values using synthetic data")
@@ -99,11 +114,18 @@ def cli():
     args.input_fq = args.input_fn.replace('.pkl', '.fastq')
     if args.synthetic_data_available:
         assert args.input_fn.endswith('.pkl'), 'Must provide pkl format for synthetic data'
+    if args.input_fn.endswith('.pkl'):
+        if args.reference_seqs is None:
+            args.reference_seqs = args.input_fn
+        if args.ref_seq_col is None:
+            args.ref_seq_col = 'variant'
+        args.max_edits_compressed = max(args.max_edits_compressed, 6)
+        args.max_edits_full = max(args.max_edits_full, 15)
 
     # Set up directories and filenames
-    args.barcode_directory = args.input_fq.split('/barcode')[-1].split('/')[0].split('_')[0]
-    args.barcode_directory = 'sample' if args.barcode_directory == '' else args.barcode_directory
-    args.output_dir = f'{args.barcode_directory}/'
+    if args.output_dir is None:
+        args.output_dir = path.splitext(args.input_fq)[0]
+    args.output_dir = args.output_dir.rstrip('/') + '/'
     args.cluster_dir = args.output_dir + '/clusters/'
     args.consensus_dir = args.output_dir + 'consensus/'
 
