@@ -44,7 +44,7 @@ Quick usage examples
 ### Generate a barcode template
 
 Generate a barcode template (length 60, max homopolymer length 3):
-Barcode length greater than 60 is recommended for better barcode clustering.
+Barcode length greater than 50 is recommended for better barcode clustering.
 
 `generate_barcode_template --barcode_len 60 --max_homopolymer_len 3`
 
