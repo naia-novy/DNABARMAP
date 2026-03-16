@@ -767,30 +767,62 @@ def main():
     direct = False
 
     if direct:
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--barcode_template', type=str, default=None)
-        parser.add_argument('--fn', type=str, default=None)
-        parser.add_argument('--left_coding_flank', type=str, default=None)
-        parser.add_argument('--right_coding_flank', type=str, default=None)
-        parser.add_argument('--mapping_fn', type=str, default=None)
-        parser.add_argument('--reference_seqs', type=str, default=None)
-        parser.add_argument('--ref_seq_col', type=str, default=None)
-        parser.add_argument('--ref_name_col', type=str, default=None)
-        parser.add_argument('--max_edits_compressed', type=int, default=3)
-        parser.add_argument('--max_edits_full', type=int, default=5)
+        parser = argparse.ArgumentParser(
+            description="Map a single consensus FASTA directly to barcode and "
+                        "coding-region calls."
+        )
+        parser.add_argument('--barcode_template', type=str, default=None,
+                            help="Degenerate barcode template used to locate "
+                                 "the barcode interval.")
+        parser.add_argument('--fn', type=str, default=None,
+                            help="Consensus FASTA file to map.")
+        parser.add_argument('--left_coding_flank', type=str, default=None,
+                            help="Constant sequence immediately left of the "
+                                 "coding region.")
+        parser.add_argument('--right_coding_flank', type=str, default=None,
+                            help="Constant sequence immediately right of the "
+                                 "coding region.")
+        parser.add_argument('--mapping_fn', type=str, default=None,
+                            help="Output TSV filename for mapping results.")
+        parser.add_argument('--reference_seqs', type=str, default=None,
+                            help="Optional reference sequences for coding-region snapping.")
+        parser.add_argument('--ref_seq_col', type=str, default=None,
+                            help="Sequence column to use when --reference_seqs "
+                                 "points to a table or pickle.")
+        parser.add_argument('--ref_name_col', type=str, default=None,
+                            help="Name column to use when --reference_seqs "
+                                 "points to a table or pickle.")
+        parser.add_argument('--max_edits_compressed', type=int, default=3,
+                            help="Maximum edit distance in homopolymer-compressed "
+                                 "space for reference snapping prefilter.")
+        parser.add_argument('--max_edits_full', type=int, default=5,
+                            help="Maximum full-length edit distance to accept a "
+                                 "reference snap.")
 
         all_args = parser.parse_known_args()
         args = all_args[0]
         direct_mapping(**vars(args))
 
     else:
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(
+            description="Map consensus sequences to barcode and coding-region "
+                        "calls, with optional snapping to a reference set."
+        )
 
-        parser.add_argument('--consensus_dir', type=str, default=None, required=not direct)
-        parser.add_argument("--mapping_fn", default=None, required=True)
-        parser.add_argument('--barcode_template', type=str, required=True, default=None)
-        parser.add_argument("--left_coding_flank", default=None, required=True)
-        parser.add_argument("--right_coding_flank", default=None, required=True)
+        parser.add_argument('--consensus_dir', type=str, default=None, required=not direct,
+                            help="Directory containing cluster_*_consensus.fasta "
+                                 "files to map.")
+        parser.add_argument("--mapping_fn", default=None, required=True,
+                            help="Output TSV filename for the final mapping results.")
+        parser.add_argument('--barcode_template', type=str, required=True, default=None,
+                            help="Degenerate barcode template used to locate the "
+                                 "barcode interval in each consensus.")
+        parser.add_argument("--left_coding_flank", default=None, required=True,
+                            help="Constant sequence immediately left of the "
+                                 "coding region.")
+        parser.add_argument("--right_coding_flank", default=None, required=True,
+                            help="Constant sequence immediately right of the "
+                                 "coding region.")
 
         # Reference snapping args
         parser.add_argument("--reference_seqs", type=str, default=None,

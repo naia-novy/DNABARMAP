@@ -6,7 +6,11 @@ from Bio.Seq import Seq
 import gzip
 import uuid
 
+_BACKEND_NOTE_PRINTED = False
+
+
 def import_cupy_numpy(print_note=False):
+    global _BACKEND_NOTE_PRINTED
     gpu_available = False
     try:
         import cupy as np
@@ -21,8 +25,9 @@ def import_cupy_numpy(print_note=False):
     except Exception:
         import numpy as np
 
-    if print_note:
-        print(f"Using {'CuPy (GPU)' if gpu_available else 'NumPy (CPU)'} as backend")
+    if print_note and not _BACKEND_NOTE_PRINTED:
+        # print(f"Using {'CuPy (GPU)' if gpu_available else 'NumPy (CPU)'} as backend")
+        _BACKEND_NOTE_PRINTED = True
 
     return np
 

@@ -4,16 +4,15 @@ import random
 import argparse
 from itertools import product
 from collections import Counter
-import seaborn as sns
-import matplotlib.pyplot as plt
 from os import makedirs
 
 from dnabarmap.generate import generate_sequence, generate_random_barcodes
 from dnabarmap.utils import degenerate_map, int_to_degenerate, generate_random_mut, write_synthetic_fastq
 import dnabarmap.simulate as sim
 
-seed = 100
-np.random.seed(seed)
+DEFAULT_SEED = 100
+np.random.seed(DEFAULT_SEED)
+random.seed(DEFAULT_SEED)
 
 
 IUPAC = {
@@ -99,14 +98,17 @@ def generate_barcode_template(barcode_len, motif, max_homopolymer_len=3, attempt
             score = score_template(barcode)
             scores.append(score)
 
-    sns.histplot(scores)
-    plt.show()
     barcode = observations[np.argmax(scores)]
 
     return barcode
 
 
-def simulate_barcoded_data(variant, barcode_template, duplication_rate, left_coding_flank, right_coding_flank):
+def simulate_barcoded_data(variant, barcode_template, duplication_rate, left_coding_flank,
+                           right_coding_flank, quality_preset='cleaner',
+                           qshmm_model='QSHMM-ONT-HQ.model', accuracy_mean=None,
+                           difference_ratio=None, hp_del_bias=None,
+                           pass_num=None, length_mean=None, length_sd=None,
+                           seed=None):
     # Define the degenerate nucleotide set
     degenerate_nucleotides = set("RYSWBKMDHVN")
 
@@ -125,7 +127,18 @@ def simulate_barcoded_data(variant, barcode_template, duplication_rate, left_cod
     # noise sequence with nanopore simulator
     true_reference = barcode_template
     generated_sequences_init = [pre_flank + b + buffer + left_coding_flank + variant + right_coding_flank + post_flank for b in true_barcodes]
-    generated_sequences, generated_qualities = sim.simulate_many(generated_sequences_init)
+    generated_sequences, generated_qualities = sim.simulate_many(
+        generated_sequences_init,
+        quality_preset=quality_preset,
+        qshmm_model=qshmm_model,
+        accuracy_mean=accuracy_mean,
+        difference_ratio=difference_ratio,
+        hp_del_bias=hp_del_bias,
+        pass_num=pass_num,
+        length_mean=length_mean,
+        length_sd=length_sd,
+        seed=seed,
+    )
 
     return true_reference, generated_sequences, true_barcodes, true_barcodes_no_constant, generated_qualities
 
@@ -136,18 +149,49 @@ def main(barcode_template, coding_sequence, left_coding_flank, right_coding_flan
     mapping_fn = fn + '_mapping.tsv'
 
     data = []
-    qualities = []
+    pbsim_seed_base = kwargs.get('pbsim_seed')
+    if pbsim_seed_base is None:
+        pbsim_seed_base = kwargs.get('seed')
     for m in range(num_variants):
         variant = generate_random_mut(coding_sequence, num_muts=3)
         for b in range(barcodes_per_variant):
-            out = simulate_barcoded_data(variant, barcode_template, duplication_rate, left_coding_flank, right_coding_flank)
-            data += [[out[0], v, out[2][i], out[3][i], variant] for i, v in enumerate(out[1])]
-            qualities += out[-1]
+            call_seed = None
+            if pbsim_seed_base is not None:
+                call_seed = int(pbsim_seed_base) + (m * barcodes_per_variant) + b
+            out = simulate_barcoded_data(
+                variant,
+                barcode_template,
+                duplication_rate,
+                left_coding_flank,
+                right_coding_flank,
+                quality_preset=kwargs.get('quality_preset', 'cleaner'),
+                qshmm_model=kwargs.get('qshmm_model', 'QSHMM-ONT-HQ.model'),
+                accuracy_mean=kwargs.get('accuracy_mean'),
+                difference_ratio=kwargs.get('difference_ratio'),
+                hp_del_bias=kwargs.get('hp_del_bias'),
+                pass_num=kwargs.get('pass_num'),
+                length_mean=kwargs.get('length_mean'),
+                length_sd=kwargs.get('length_sd'),
+                seed=call_seed,
+            )
+            data += [
+                [out[0], seq, out[2][i], out[3][i], variant, out[-1][i]]
+                for i, seq in enumerate(out[1])
+            ]
 
-    data = pd.DataFrame(data, columns=['reference', 'synthetic_sequence', 'barcode_with_flanks', 'true_barcode', 'variant'])
-    write_synthetic_fastq(data.synthetic_sequence.to_list(), fastq_fn, qualities=qualities)
+    data = pd.DataFrame(
+        data,
+        columns=['reference', 'synthetic_sequence', 'barcode_with_flanks',
+                 'true_barcode', 'variant', 'quality'],
+    )
+    data = data.sample(frac=1, random_state=kwargs.get('seed')).reset_index(drop=True)
 
-    data = data.sample(frac=1).reset_index(drop=True)
+    write_synthetic_fastq(
+        data.synthetic_sequence.to_list(),
+        fastq_fn,
+        qualities=data.quality.to_list(),
+    )
+
     data.to_pickle(fasta_fn.replace('.fasta', '.pkl'))
 
     print(f"Generated {len(data)} synthetic sequences using barcode template:\n{data.reference[0]}")
@@ -157,42 +201,85 @@ def main(barcode_template, coding_sequence, left_coding_flank, right_coding_flan
     mapping.to_csv(mapping_fn.replace('.tsv', '_synthetic.tsv'), sep='\t', index=False)
 
 def cli():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Generate synthetic DNABARMAP reads plus a truth table."
+    )
 
     # Parameters if generating new barcode
     parser.add_argument('--barcode_len', type=int, default=60,
-                        help='Length of barcode when generating')
+                        help='Barcode length to generate when '
+                             '--barcode_template is not supplied.')
     parser.add_argument('--max_homopolymer_len', type=int, default=4,
-                        help='Do not allow sequences with possible homopolymers longer than this value')
+                        help='Reject generated templates with possible '
+                             'homopolymers longer than this.')
     parser.add_argument('--attempt_n_barcodes', type=int, default=200,
-                        help='Number of attempts to generate barcode template')
+                        help='Number of template candidates to try when '
+                             'generating a barcode template automatically.')
     parser.add_argument('--motif', type=str, default=None,
-                        help='Sequence of 1,2,3,4 integers to repeat until barcode_len is met for degenerate sampling')
+                        help='Optional repeating motif of degeneracy classes '
+                             '(1,2,3,4) used when generating a template.')
 
     # Parameters defining what syndata to generate
     parser.add_argument('--duplication_rate', type=int, default=50,
-                        help='Analogous to sequencing depth')
-    parser.add_argument('--barcodes_per_variant', type=int, default=10)
-    parser.add_argument('--num_variants', type=int, default=10)
+                        help='Approximate reads per construct before PBSIM '
+                             'simulation.')
+    parser.add_argument('--barcodes_per_variant', type=int, default=10,
+                        help='Distinct barcodes to generate for each variant.')
+    parser.add_argument('--num_variants', type=int, default=10,
+                        help='Number of distinct coding variants to simulate.')
 
     # Barcode and coding parameters
     parser.add_argument('--barcode_template', type=str,
                         default='VHKNSHDKSYRRSHDVYHDVBMKHDMBKVWBKMBNDMKKMKVVHKMKVHBKMNKHVDBMKVYBKMBSWBVHKMKWN',
-                        help='Reference degenerate barcode to align sequences to')
+                        help='Degenerate barcode template to sample from. If '
+                             'omitted, one is generated automatically.')
     parser.add_argument('--coding_sequence', type=str,
                         default='ATGGAAAACAATCTGGAAAACCTGACCATCGGCGTGTTTGCGAAGGCTGCGGGCGTAAACGTGGAAACGATTCGTTTCTATCA'
                        'GCGTAAAGGGCTGCTGCGCGAACCTGACAAACCATACGGCTCAATTCGGCGTTATGGTGAGGCCGATGTCGTGCGCGTAAAATT'
                        'TGTGAAAAGTGCTCAACGCCTGGGGTTCTCCTTGGATGAGATCGCTGAACTTCTGCGTCTGGATGATGGAACTCACTGCGAAGAA'
                        'GCGAGTTCGCTCGCAGAACATAAACTCAAAGACGTTCGCGAGAAAATGGCCGACCTTGCACGTATGGAAACCGTCTTATCTGAACT'
                        'GGTTTGCGCGTGTCATGCGCGCAAGGGTAATGTTAGCTGTCCGCTGATTGCGAGCTTGCAGGGTGAGGCCGGCTTAGCCCGGAGCGCAATGCCGTAA',
-                        help='Sequence that barcodes will be mapped to')
+                        help='Base coding sequence used to generate variants.')
     parser.add_argument('--left_coding_flank', type=str, default='CCCACTG',
-                        help='Sequence just left of coding sequence to be used for extraction of mapping after clustering')
+                        help='Constant sequence immediately left of the coding '
+                             'region in the simulated construct.')
     parser.add_argument('--right_coding_flank', type=str, default='ATGCGTA',
-                        help='Sequence just right of coding sequence to be used for extraction of mapping after clustering')
-    parser.add_argument('--fn', type=str, default='syndata/syndata')
+                        help='Constant sequence immediately right of the coding '
+                             'region in the simulated construct.')
+    parser.add_argument('--fn', type=str, default='syndata/syndata',
+                        help='Output stem for the generated .pkl and .fastq.')
+    parser.add_argument('--quality_preset', choices=('cleaner', 'default', 'harsh'),
+                        default='cleaner',
+                        help="PBSIM quality preset. 'cleaner' is the recommended "
+                             "default and produces easier reads, 'harsh' produces "
+                             "noisier reads, and 'default' preserves the baseline "
+                             "simulator behavior.")
+    parser.add_argument('--qshmm_model', type=str, default='QSHMM-ONT-HQ.model',
+                        help='PBSIM QSHMM model path, or a model filename '
+                             'inside pbsim3_models/.')
+    parser.add_argument('--accuracy_mean', type=float, default=None,
+                        help='Optional PBSIM override for mean read accuracy.')
+    parser.add_argument('--difference_ratio', type=str, default=None,
+                        help='Optional PBSIM override for substitution:insertion:deletion ratio, e.g. 39:24:36.')
+    parser.add_argument('--hp_del_bias', type=float, default=None,
+                        help='Optional PBSIM override for homopolymer deletion bias.')
+    parser.add_argument('--pass_num', type=int, default=None,
+                        help='Optional PBSIM override for sequencing passes.')
+    parser.add_argument('--length_mean', type=float, default=None,
+                        help='Optional PBSIM override for mean read length.')
+    parser.add_argument('--length_sd', type=float, default=None,
+                        help='Optional PBSIM override for read length standard deviation.')
+    parser.add_argument('--pbsim_seed', type=int, default=None,
+                        help='Optional PBSIM random seed for reproducible simulations.')
+    parser.add_argument('--seed', type=int, default=DEFAULT_SEED,
+                        help='Master random seed for NumPy, Python random, and '
+                             'default PBSIM seeding (default: 100).')
 
     args = parser.parse_args()
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+    if args.pbsim_seed is None:
+        args.pbsim_seed = args.seed
 
     dirs = '/'.join(args.fn.split('/')[:-1]) if '/'.join(args.fn.split('/')[:-1]) != '' else './'
     makedirs(dirs, exist_ok=True)

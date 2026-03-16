@@ -44,7 +44,7 @@ Quick usage examples
 ### Generate a barcode template
 
 Generate a barcode template (length 60, max homopolymer length 3):
-Barcode length greater than 50 is reccomended for better barcode clustering.
+Barcode length greater than 60 is recommended for better barcode clustering.
 
 `generate_barcode_template --barcode_len 60 --max_homopolymer_len 3`
 
@@ -85,12 +85,13 @@ Flanks must be adapted according to your construct. These flanks correspond to t
 dnabarmap can also be run all at once or step-wise using the commands align, cluster, consensus, and map. Reccomended usage for full control and speed is to use commands sequentially
 
 ex all at once:
-dnabarmap --input_fn synthetic_datasets/syndata.pkl --mapping_fn mapped_barcodes.tsv --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG --min_sequences 25 --id 0.5 --medaka_model r1041_e82_400bps_hac_v5.0.0
+dnabarmap --input_fn synthetic_datasets/syndata.pkl --mapping_fn mapped_barcodes.tsv --barcode_template MSKYSWVSWSRYSRYSKYMSRYRHSRYSYKDMVSRYKMRYDHVYKWSDSYKKMSWSRYBV --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG --min_sequences 25 --id 0.5 --medaka_model r1041_e82_400bps_hac_v5.0.0
+
 ex sequentially:
-align --input_fn synthetic_datasets/syndata.fastq --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN  --output_dir syndata
-cluster --input_fn synthetic_datasets/syndata.fastq --output_dir syndata/ --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN --min_sequences 20  --id 0.5
-consensus --output_dir syndata/ --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN   --medaka_model r1041_e82_400bps_hac_v5.0.0  
-map --consensus_dir syndata/consensus/ --mapping_fn mapped_barcodes.tsv --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG
+align --input_fn synthetic_datasets/syndata.fastq --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN  --output_dir synthetic_datasets
+cluster --output_dir synthetic_datasets/syndata  --min_sequences 20  --id 0.75
+consensus --output_dir synthetic_datasets/syndata/ --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN   --medaka_model r1041_e82_400bps_hac_v5.0.0  
+map --consensus_dir synthetic_datasets/syndata/consensus/ --mapping_fn mapped_barcodes.tsv --barcode_template MNBRWHBWRYBYRYWNVYDRHKHSNDHKMRDWKDMBKWNVSWKWVNBVWKDVWDKVHVKNDHVKDMVHKHSKWBN --left_coding_flank GCTATCGT --right_coding_flank TATCAGAG
 
 
 CLI help

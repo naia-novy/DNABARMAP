@@ -1,5 +1,4 @@
 from collections import defaultdict
-from scipy.ndimage import gaussian_filter1d
 
 from dnabarmap.utils import hot_degenerate_base_mapping, import_cupy_numpy
 np = import_cupy_numpy()
@@ -15,11 +14,13 @@ def sequences_to_array(sequences, max_len):
         seq_array[i, :len(indices), :] = indices
     return seq_array
 
+
 def reference_to_array(reference):
     # Convert string based reference DNA sequences to N x 4 array (int encoding)
     indices = [hot_degenerate_base_mapping[base] for base in reference]
     ref = np.array(indices)
     return ref[np.newaxis, np.newaxis, :, :]
+
 
 def score_sequences_simple(sequence_array, reference_array):
     # Ensure reference shape matches
@@ -52,36 +53,63 @@ def score_sequences_simple(sequence_array, reference_array):
     return score
 
 
-def compute_adjacency_score(seqs, refs, max_run):
+def compute_adjacency_score(seqs, refs, min_run, max_run):
     # Ensure contiguous float32
     seqs = np.ascontiguousarray(seqs, dtype=np.float32)
     refs = np.ascontiguousarray(refs, dtype=np.float32)
 
-    # probs = np.exp(refs.sum(axis=-1))
     probs = refs.sum(axis=-1)
     wins = (seqs == refs) & (seqs == 1)
 
-    scores = wins.sum(axis=-1) / (probs + 1e-8)  # avoid div by zero
+    scores = wins.sum(axis=-1) / (probs + 1e-8)
     scores = np.ascontiguousarray(scores, dtype=np.float32)
 
     final_scores = np.zeros_like(scores)
+    pad_width = [(0, 0)] * scores.ndim
 
-    slices = [np.pad(scores[..., i:], ((0, 0), (0, 0), (0, 0), (0,i)), constant_values=0.01) for i in range(max_run)]
+    for run_len in range(min_run, max_run + 1):
+        slices = []
+        for offset in range(run_len):
+            pad_width[-1] = (0, offset)
+            shifted = np.pad(scores[..., offset:], pad_width, constant_values=0.0)
+            slices.append(shifted)
 
-    result_fw = np.prod(np.stack(slices[:max_run], axis=0), axis=0)
-    final_scores += (result_fw)
+        stacked = np.stack(slices, axis=0)
+        window_score = np.prod(stacked, axis=0) ** (1.0 / run_len)
+        final_scores += (run_len ** 2) * window_score
 
     return final_scores
 
 
+def _gaussian_kernel1d(sigma):
+    radius = max(1, int(3 * float(sigma)))
+    x = np.arange(-radius, radius + 1, dtype=np.float32)
+    kernel = np.exp(-(x ** 2) / (2 * float(sigma) ** 2))
+    kernel /= kernel.sum()
+    return kernel
+
+
+def _smooth_roll_scores(scores, sigma):
+    kernel = _gaussian_kernel1d(sigma)
+    radius = kernel.shape[0] // 2
+    padded = np.pad(scores, ((0, 0), (radius, radius), (0, 0)), mode='edge')
+    smoothed = np.empty_like(scores, dtype=np.float32)
+
+    for idx in range(scores.shape[1]):
+        window = padded[:, idx:idx + kernel.shape[0], :]
+        smoothed[:, idx, :] = (window * kernel[np.newaxis, :, np.newaxis]).sum(axis=1)
+
+    return smoothed
+
+
 def find_best_rolls_batch(seqs, ref):
     # Parameters
+    min_run = 2
     max_run = 5
     max_shift = seqs.shape[-2]
     min_shift = 0
     provided_range = np.arange(min_shift, max_shift + 1)
 
-    # provided_range = np.arange(min_shift, max_shift + 1)
     n_rolls = len(provided_range)
     n_strands, n_seqs, seq_len, seq_dim = seqs.shape
 
@@ -90,12 +118,12 @@ def find_best_rolls_batch(seqs, ref):
     for idx, shift in enumerate(provided_range):
         rolled = np.roll(seqs, shift=-shift, axis=2)
         if shift > 0:
-            rolled[:, :, -shift:] = 0  # zero out wrapped portion
+            rolled[:, :, -shift:] = 0
         rolled_all[:, idx] = rolled[:, :, :ref.shape[-2]]
 
-    adjacency_matrix = compute_adjacency_score(rolled_all, ref[np.newaxis], max_run=max_run)
+    adjacency_matrix = compute_adjacency_score(rolled_all, ref[np.newaxis], min_run=min_run, max_run=max_run)
     adjacency_score = adjacency_matrix.sum(axis=(-1))
-    smoothed = gaussian_filter1d(adjacency_score, axis=-2, sigma=3)
+    smoothed = _smooth_roll_scores(adjacency_score, sigma=5)
 
     # Pick best strand per sequence
     direction = np.argmax(np.max(smoothed, axis=1), axis=0)
@@ -112,12 +140,12 @@ def roll_batch(batch_array, roll_values):
     for idx, shift in enumerate(roll_values):
         if shift == 0:
             continue
-        key = int(shift)  # ensure hashable
+        key = int(shift)
         shift_groups[key].append(idx)
 
     # Apply roll per unique shift
     for shift, indices in shift_groups.items():
-        rolled_batch = np.roll(batch_array[indices], shift=-shift, axis=1)  # axis=1 assumes time or sequence axis
+        rolled_batch = np.roll(batch_array[indices], shift=-shift, axis=1)
         rolled[indices] = rolled_batch
 
     return rolled

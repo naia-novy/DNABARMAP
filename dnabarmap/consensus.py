@@ -33,8 +33,46 @@ import statistics
 import sys
 
 TIMEOUT = 3600  # 1 hour timeout for all subprocess calls
-DEFAULT_MIN_OVERLAP_FRACTION = 0.6
-DEFAULT_MIN_ALIGNED_BASES = 100
+DEFAULT_MIN_OVERLAP_FRACTION = 0.5
+DEFAULT_MIN_ALIGNED_BASES = 80
+CONSENSUS_STRICTNESS_PRESETS = {
+    'relaxed': {
+        'min_identity': 0.80,
+        'min_dominant_fraction': 0.35,
+        'min_overlap_fraction': 0.45,
+        'min_aligned_bases': 60,
+        'max_mismatches': 8,
+        'max_indels': 5,
+        'min_window_score': 0.55,
+    },
+    'default': {
+        'min_identity': 0.83,
+        'min_dominant_fraction': 0.4,
+        'min_overlap_fraction': DEFAULT_MIN_OVERLAP_FRACTION,
+        'min_aligned_bases': DEFAULT_MIN_ALIGNED_BASES,
+        'max_mismatches': 6,
+        'max_indels': 4,
+        'min_window_score': 0.65,
+    },
+    'strict': {
+        'min_identity': 0.88,
+        'min_dominant_fraction': 0.55,
+        'min_overlap_fraction': 0.65,
+        'min_aligned_bases': 120,
+        'max_mismatches': 4,
+        'max_indels': 2,
+        'min_window_score': 0.78,
+    },
+}
+ADVANCED_TUNING_KEYS = (
+    'min_identity',
+    'min_dominant_fraction',
+    'min_overlap_fraction',
+    'min_aligned_bases',
+    'max_mismatches',
+    'max_indels',
+    'min_window_score',
+)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -483,46 +521,6 @@ def snap_barcode_to_template(barcode, template, max_mismatches=5, max_indels=3):
     return result, stats
 
 
-def snap_barcode_in_consensus(consensus_seq, barcode_template,
-                               max_mismatches=5, max_indels=3,
-                               min_window_score=0.7,
-                               allow_reverse_complement=False):
-    consensus_upper = consensus_seq.upper()
-    template_upper = barcode_template.upper()
-
-    start, end, orient, window_score, effective_template = _find_barcode_region(
-        consensus_upper, template_upper,
-        search_margin=max_indels,
-        allow_reverse_complement=allow_reverse_complement,
-    )
-
-    if start < 0 or window_score < min_window_score:
-        return None, {
-            'rejected': True,
-            'reason': f'no_match (best_score={window_score:.3f}, '
-                      f'threshold={min_window_score})',
-        }
-
-    raw_barcode = consensus_upper[start:end]
-
-    corrected_bc, stats = snap_barcode_to_template(
-        raw_barcode, effective_template,
-        max_mismatches=max_mismatches,
-        max_indels=max_indels,
-    )
-
-    if corrected_bc is None:
-        return None, stats
-
-    stats['orientation'] = orient
-    stats['window_score'] = window_score
-    stats['barcode_start'] = start
-    stats['barcode_end'] = end
-
-    corrected_full = consensus_upper[:start] + corrected_bc + consensus_upper[end:]
-    return corrected_full, stats
-
-
 def _normalize_barcode_to_template(barcode, template):
     """
     Align a raw barcode window to the template length while preserving the
@@ -616,113 +614,7 @@ def _extract_read_barcode_signature(seq, barcode_template,
     }
 
 
-def _build_signature_barcode_consensus(input_fq, barcode_template,
-                                       min_window_score=0.55,
-                                       max_mismatches=5, max_indels=3):
-    stats = {
-        'n_used': 0,
-        'rejected': False,
-    }
-
-    if not input_fq or not path.exists(input_fq):
-        stats['rejected'] = True
-        stats['reason'] = 'missing_cluster_reads'
-        return None, stats
-
-    normalized_barcodes = []
-    relaxed_window = min(min_window_score, 0.55)
-    search_margin = max(max_indels * 2, 6)
-
-    for record in SeqIO.parse(input_fq, "fastq"):
-        signature = _extract_read_barcode_signature(
-            str(record.seq),
-            barcode_template,
-            min_window_score=relaxed_window,
-            search_margin=search_margin,
-        )
-        if signature is None:
-            continue
-
-        corrected_bc, _ = snap_barcode_to_template(
-            signature['raw_barcode'],
-            signature['template'],
-            max_mismatches=max(max_mismatches * 2, 10),
-            max_indels=max(max_indels * 2, 8),
-        )
-        normalized_barcodes.append(
-            corrected_bc if corrected_bc is not None else signature['normalized_barcode']
-        )
-
-    stats['n_used'] = len(normalized_barcodes)
-    if not normalized_barcodes:
-        stats['rejected'] = True
-        stats['reason'] = 'no_signature_barcodes'
-        return None, stats
-
-    top_counts = []
-    coverages = []
-    consensus = []
-    width = len(normalized_barcodes[0])
-    for idx in range(width):
-        counts = Counter(base for base in (bc[idx] for bc in normalized_barcodes) if base != 'N')
-        if counts:
-            top_base, top_count = counts.most_common(1)[0]
-            consensus.append(top_base)
-            top_counts.append(top_count)
-            coverages.append(sum(counts.values()))
-        else:
-            consensus.append('N')
-            top_counts.append(0)
-            coverages.append(0)
-
-    consensus_barcode = ''.join(consensus)
-    corrected_consensus, snap_stats = snap_barcode_to_template(
-        consensus_barcode,
-        barcode_template,
-        max_mismatches=max(max_mismatches * 2, 10),
-        max_indels=max(max_indels * 2, 8),
-    )
-    if corrected_consensus is not None:
-        consensus_barcode = corrected_consensus
-        stats['total_edits'] = snap_stats.get('total_edits', 0)
-
-    stats['top_fractions'] = [
-        top / max(1, cov)
-        for top, cov in zip(top_counts, coverages)
-    ]
-    return consensus_barcode, stats
-
-
-def _apply_signature_edge_correction(barcode_seq, signature_barcode,
-                                     signature_barcode_stats,
-                                     min_tail_fraction=0.75):
-    if (not barcode_seq or not signature_barcode or
-            not signature_barcode_stats or
-            signature_barcode_stats.get('rejected') or
-            signature_barcode == barcode_seq):
-        return barcode_seq, None
-
-    diffs = [
-        idx for idx, (a, b) in enumerate(zip(barcode_seq, signature_barcode))
-        if a != b
-    ]
-    if len(diffs) != 1:
-        return barcode_seq, None
-
-    diff_idx = diffs[0]
-    top_fractions = signature_barcode_stats.get('top_fractions', [])
-    diff_frac = top_fractions[diff_idx] if diff_idx < len(top_fractions) else 0.0
-
-    if diff_idx == len(barcode_seq) - 1 and diff_frac >= min_tail_fraction:
-        return barcode_seq[:-1] + signature_barcode[-1], {
-            'kind': 'tail_vote',
-            'frac': diff_frac,
-        }
-
-    return barcode_seq, None
-
-
-def _barcode_distance(barcode_a, barcode_b, min_comparable=50):
+def _barcode_distance(barcode_a, barcode_b, min_comparable=12):
     mismatches = 0
     comparable = 0
 
@@ -1126,32 +1018,6 @@ def _build_fullread_barcode_consensus(input_fq, consensus_seq, barcode_template,
     return best_call['barcode'], stats
 
 
-def _inject_barcode_into_consensus(consensus_seq, barcode_seq, barcode_template,
-                                   search_margin=6):
-    if not consensus_seq or not barcode_seq:
-        return None, {'rejected': True, 'reason': 'missing_sequence'}
-
-    start, end, orient, window_score, effective_template = _find_barcode_region(
-        consensus_seq.upper(),
-        barcode_template.upper(),
-        search_margin=search_margin,
-        allow_reverse_complement=False,
-    )
-
-    if start < 0:
-        return None, {'rejected': True, 'reason': 'barcode_region_not_found'}
-
-    corrected_full = consensus_seq.upper()[:start] + barcode_seq.upper() + consensus_seq.upper()[end:]
-    return corrected_full, {
-        'rejected': False,
-        'barcode_start': start,
-        'barcode_end': end,
-        'window_score': window_score,
-        'orientation': orient,
-        'template': effective_template,
-    }
-
-
 def _inject_barcode_at_interval(consensus_seq, barcode_seq, interval_start, interval_end):
     if not consensus_seq or not barcode_seq:
         return None, {'rejected': True, 'reason': 'missing_sequence'}
@@ -1525,8 +1391,8 @@ def filter_cluster_reads_by_barcode(input_fq, barcode_template,
         return None, set(), stats
 
     barcode_len = len(barcode_template)
-    min_comparable = max(45, int(barcode_len * 0.7))
-    max_distance = max(8, int(barcode_len * 0.16))
+    min_comparable = min(barcode_len, max(8, int(barcode_len * 0.7)))
+    max_distance = max(3, int(round(barcode_len * 0.16)))
 
     best_indices = []
     best_tiebreak = (-1, -1.0, -1.0)
@@ -1624,7 +1490,7 @@ def _choose_draft_record(records, draft_support=None):
     )
 
 
-def _select_polishing_records(records, draft_support=None, max_reads=24):
+def _select_polishing_records(records, draft_support=None, max_reads=50):
     """Keep a representative high-support subset for polishing."""
     if max_reads is None:
         return records
@@ -1649,6 +1515,40 @@ def _select_polishing_records(records, draft_support=None, max_reads=24):
         reverse=True,
     )
     return ranked[:max_reads]
+
+
+def _load_single_fasta_sequence(fasta_path):
+    records = list(SeqIO.parse(fasta_path, "fasta"))
+    if not records:
+        return None
+    return str(records[0].seq)
+
+
+def _prepare_unique_fastq_ids(input_reads, output_dir):
+    """
+    Racon rejects FASTQs that reuse a read ID for different sequences.
+    Rewrite only duplicates, preserving qualities, when needed.
+    """
+    seen = Counter()
+    rewritten = []
+    needs_rewrite = False
+
+    for record in SeqIO.parse(input_reads, "fastq"):
+        seen[record.id] += 1
+        if seen[record.id] > 1:
+            needs_rewrite = True
+            record.id = f"{record.id}__dup{seen[record.id]}"
+            record.name = record.id
+            record.description = ""
+        rewritten.append(record)
+
+    if not needs_rewrite:
+        return input_reads
+
+    sanitized_reads = path.join(output_dir, "reads_unique.fastq")
+    with open(sanitized_reads, "w") as out_handle:
+        SeqIO.write(rewritten, out_handle, "fastq")
+    return sanitized_reads
 # ═════════════════════════════════════════════════════════════════
 # MEDAKA DETECTION
 # ═════════════════════════════════════════════════════════════════
@@ -1776,6 +1676,7 @@ def run_racon(input_reads, draft_fasta, output_dir, threads, rounds=1):
     a single round is usually sufficient.
     """
     makedirs(output_dir, exist_ok=True)
+    input_reads = _prepare_unique_fastq_ids(input_reads, output_dir)
 
     current_draft = draft_fasta
 
@@ -1842,7 +1743,7 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
                          min_overlap_fraction, min_aligned_bases,
                          timeout, left_coding_flank=None,
                          right_coding_flank=None, racon_rounds=2,
-                         max_polish_reads=24,
+                         max_polish_reads=50,
                          keep_intermediates=False):
     """
     Process a single cluster FASTQ -> consensus FASTA.
@@ -1869,13 +1770,16 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
     # ── Step 1: minimap2 self-map ────────────────────────────────
     try:
         with open(paf_file, "w") as paf_handle:
-            subprocess.run(
+            map_result = subprocess.run(
                 ["minimap2", "-x", "ava-ont", "-c", "-t", str(threads),
                  cluster_fq, cluster_fq],
                 stdout=paf_handle,
-                check=True,
+                stderr=subprocess.PIPE,
                 timeout=TIMEOUT
             )
+        if map_result.returncode != 0:
+            stderr_tail = map_result.stderr.decode(errors='replace')[-500:]
+            raise RuntimeError(f"minimap2 self-map failed\nSTDERR:\n{stderr_tail}")
     except subprocess.TimeoutExpired:
         result['status'] = 'timeout_selfmap'
         if path.exists(paf_file):
@@ -1907,7 +1811,10 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
     barcode_keep_ids = set()
     barcode_filter_stats = None
 
-    if barcode_template:
+    barcode_filter_input_n = filter_stats.get('n_kept', result['n_total']) if filtered_fq else result['n_total']
+    should_try_barcode_filter = barcode_template and barcode_filter_input_n >= 8
+
+    if should_try_barcode_filter:
         barcode_filter_input = filtered_fq if filtered_fq is not None else cluster_fq
         barcode_filtered_fq, barcode_keep_ids, barcode_filter_stats = filter_cluster_reads_by_barcode(
             barcode_filter_input,
@@ -1932,7 +1839,7 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
         fullread_n_kept = filter_stats.get('n_kept', result['n_total'])
         use_barcode_filter = (
             filtered_fq is None or
-            barcode_n_kept >= max(3, int(fullread_n_kept * 0.6))
+            barcode_n_kept >= max(4, int(fullread_n_kept * 0.8))
         )
 
     if use_barcode_filter:
@@ -1989,6 +1896,7 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
     # ── Step 4: Polishing ────────────────────────────────────────
     pileup_dir = f"{sub_dir}/{cluster_id}_pileup"
     racon_dir = f"{sub_dir}/{cluster_id}_racon"
+    full_refine_dir = f"{sub_dir}/{cluster_id}_full_refine"
 
     if medaka_model and medaka_model.lower() != "none":
         # Full Medaka polishing
@@ -2051,30 +1959,68 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
             result['racon_warning'] = f'{e}, fell back to draft'
             result['consensus_method'] = 'draft (racon failed)'
 
-    records = list(SeqIO.parse(polished, "fasta"))
-    if not records:
+    consensus_seq = _load_single_fasta_sequence(polished)
+    if consensus_seq is None:
         result['status'] = 'no_consensus'
         _cleanup_filtered(filtered_fq, cluster_fq)
         return result
 
-    consensus_seq = str(records[0].seq)
+    # ── Step 4b: whole-sequence iterative refinement ────────────
+    full_refine_rounds = 0
+    current_consensus_fasta = polished
+    refine_reads = polish_fq
+    if refine_reads and path.exists(refine_reads):
+        max_full_refine_rounds = 1 if medaka_model and medaka_model.lower() != "none" else 2
+        for round_idx in range(max_full_refine_rounds):
+            round_dir = path.join(full_refine_dir, f"round_{round_idx + 1}")
+            try:
+                if medaka_model and medaka_model.lower() != "none":
+                    refined_fasta = run_medaka(
+                        input_reads=refine_reads,
+                        draft_fasta=current_consensus_fasta,
+                        output_dir=round_dir,
+                        model=medaka_model,
+                        threads=threads,
+                    )
+                else:
+                    refined_fasta = run_racon(
+                        input_reads=refine_reads,
+                        draft_fasta=current_consensus_fasta,
+                        output_dir=round_dir,
+                        threads=threads,
+                        rounds=1,
+                    )
+            except subprocess.TimeoutExpired:
+                result['full_refine_warning'] = 'timeout'
+                break
+            except Exception as e:
+                result['full_refine_warning'] = str(e)
+                break
+
+            refined_seq = _load_single_fasta_sequence(refined_fasta)
+            if refined_seq is None or refined_seq == consensus_seq:
+                break
+
+            consensus_seq = refined_seq
+            current_consensus_fasta = refined_fasta
+            full_refine_rounds += 1
+
+    if full_refine_rounds > 0:
+        result['full_refine_rounds'] = full_refine_rounds
+        if result.get('consensus_method') == 'medaka':
+            result['consensus_method'] = 'medaka + full refine'
+        elif result.get('consensus_method') == 'racon':
+            result['consensus_method'] = 'racon + full refine'
+        elif result.get('consensus_method'):
+            result['consensus_method'] = f"{result['consensus_method']} + full refine"
 
     # ── Diagnostic: check if polishing actually changed the draft ─
     if path.exists(draft_fasta):
-        draft_records = list(SeqIO.parse(draft_fasta, "fasta"))
-        if draft_records:
-            draft_seq = str(draft_records[0].seq)
-            if consensus_seq == draft_seq:
-                result['polish_warning'] = 'consensus identical to draft (polishing had no effect)'
-            else:
-                # Count differences
-                if len(consensus_seq) == len(draft_seq):
-                    n_diff = sum(1 for a, b in zip(consensus_seq, draft_seq) if a != b)
-                    result['polish_changes'] = n_diff
-                else:
-                    result['polish_changes'] = f'len_change:{len(draft_seq)}->{len(consensus_seq)}'
+        draft_seq = _load_single_fasta_sequence(draft_fasta)
+        if draft_seq is not None and consensus_seq == draft_seq:
+            result['polish_warning'] = 'consensus identical to draft (polishing had no effect)'
 
-    # ── Step 5: Barcode diagnostics (no barcode reinjection) ─────
+    # ── Step 5: Full-read barcode consensus and reinjection ──────
     authoritative_barcode = None
     if barcode_template:
         authoritative_barcode, authoritative_barcode_stats = _build_fullread_barcode_consensus(
@@ -2100,6 +2046,21 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
                 result['barcode_head_first'] = head_ratio
             if authoritative_barcode_stats.get('total_edits', 0) > 0:
                 result['barcode_consensus_edits'] = authoritative_barcode_stats['total_edits']
+        interval = None if authoritative_barcode_stats is None else authoritative_barcode_stats.get('interval')
+        if authoritative_barcode and interval:
+            corrected_seq, inject_stats = _inject_barcode_at_interval(
+                consensus_seq,
+                authoritative_barcode,
+                interval[0],
+                interval[1],
+            )
+            if corrected_seq is not None and corrected_seq != consensus_seq:
+                result['barcode_reinjected'] = True
+                result['barcode_reinjection_edits'] = sum(
+                    base_a != base_b
+                    for base_a, base_b in zip(consensus_seq, corrected_seq)
+                ) + abs(len(corrected_seq) - len(consensus_seq))
+                consensus_seq = corrected_seq
 
     if left_coding_flank and right_coding_flank:
         preferred_coding_len = _estimate_coding_length_from_reads(
@@ -2135,6 +2096,8 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
             shutil.rmtree(medaka_dir, ignore_errors=True)
         if path.isdir(racon_dir):
             shutil.rmtree(racon_dir, ignore_errors=True)
+        if path.isdir(full_refine_dir):
+            shutil.rmtree(full_refine_dir, ignore_errors=True)
         if path.isdir(pileup_dir):
             shutil.rmtree(pileup_dir, ignore_errors=True)
         _cleanup_filtered(filtered_fq, cluster_fq)
@@ -2149,6 +2112,98 @@ def _cleanup_filtered(filtered_fq, original_fq):
         remove(filtered_fq)
 
 
+def _apply_consensus_strictness(args):
+    preset_values = CONSENSUS_STRICTNESS_PRESETS[args.strictness]
+    advanced_overrides = {
+        key: getattr(args, key)
+        for key in ADVANCED_TUNING_KEYS
+        if getattr(args, key) is not None
+    }
+
+    for key, value in preset_values.items():
+        if getattr(args, key) is None:
+            setattr(args, key, value)
+
+    return advanced_overrides
+
+
+def _format_barcode_retry_label(retry_value):
+    if not retry_value:
+        return None
+    if retry_value == 'end+1':
+        return "barcode interval shifted right"
+    if retry_value == 'projected_local':
+        return "barcode interval recalculated"
+    if retry_value.startswith('start-'):
+        shift = retry_value.split('-', 1)[1]
+        return f"barcode interval shifted left {shift} bp"
+    return f"barcode interval {retry_value}"
+
+
+def _short_warning_text(text):
+    if not text:
+        return None
+    short = str(text).strip().splitlines()[0].strip()
+    return re.sub(r'\s+', ' ', short)
+
+
+def _format_cluster_status(res):
+    status = res.get('status', 'unknown')
+    cid = res.get('cluster_id', '?')
+    n_total = res.get('n_total', 0)
+    n_kept = res.get('n_kept', 0)
+
+    if status == 'ok':
+        parts = [f"kept {n_kept}/{n_total} reads"]
+
+        method = res.get('consensus_method')
+        if method:
+            parts.append(method)
+
+        if res.get('n_polish_reads') is not None and res['n_polish_reads'] != n_kept:
+            parts.append(f"polished {res['n_polish_reads']} reads")
+
+        if res.get('full_refine_rounds'):
+            rounds = res['full_refine_rounds']
+            parts.append(f"full refine x{rounds}")
+
+        if res.get('barcode_filter'):
+            parts.append("barcode filter applied")
+
+        retry_label = _format_barcode_retry_label(res.get('barcode_interval_retry'))
+        if retry_label:
+            parts.append(retry_label)
+
+        if res.get('flank_edits', 0) > 0:
+            parts.append("coding flanks corrected")
+
+        warnings = []
+        if res.get('snap_warning'):
+            warnings.append(_short_warning_text(res['snap_warning']))
+        if res.get('flank_warning'):
+            warnings.append(_short_warning_text(res['flank_warning']))
+        if res.get('medaka_warning'):
+            warnings.append(f"medaka fallback: {_short_warning_text(res['medaka_warning'])}")
+        if res.get('racon_warning'):
+            warnings.append(f"racon fallback: {_short_warning_text(res['racon_warning'])}")
+        if res.get('full_refine_warning'):
+            warnings.append(f"full refine: {_short_warning_text(res['full_refine_warning'])}")
+        if res.get('polish_warning'):
+            warnings.append(_short_warning_text(res['polish_warning']))
+
+        message = f"{cid}: ok | " + " | ".join(parts)
+        if warnings:
+            message += " | warning: " + "; ".join(warnings)
+        return message
+
+    if status == 'purity_rejected':
+        fs = res.get('filter_stats', {})
+        reason = fs.get('reason', '?')
+        return f"{cid}: skipped | kept {n_kept}/{n_total} reads after filtering | {reason}"
+
+    return f"{cid}: failed | {status}"
+
+
 # ═════════════════════════════════════════════════════════════════
 # BATCH CONSENSUS (parallel)
 # ═════════════════════════════════════════════════════════════════
@@ -2158,16 +2213,16 @@ def determine_consensus_parallel(output_dir, total_threads=8,
                                   barcode_template=None,
                                   left_coding_flank=None,
                                   right_coding_flank=None,
-                                  max_mismatches=5, max_indels=3,
-                                  min_window_score=0.7,
-                                  min_identity=0.85,
-                                  min_dominant_fraction=0.5,
+                                  max_mismatches=6, max_indels=4,
+                                  min_window_score=0.65,
+                                  min_identity=0.83,
+                                  min_dominant_fraction=0.4,
                                   min_overlap_fraction=DEFAULT_MIN_OVERLAP_FRACTION,
                                   min_aligned_bases=DEFAULT_MIN_ALIGNED_BASES,
                                   n_workers=None,
                                   timeout=3600,
                                   racon_rounds=2,
-                                  max_polish_reads=24,
+                                  max_polish_reads=50,
                                   keep_intermediates=False,
                                   **kwargs):
     """
@@ -2192,7 +2247,7 @@ def determine_consensus_parallel(output_dir, total_threads=8,
         print(f"  WARNING: No cluster FASTQ files found in {full_seqs_dir}/")
         return
 
-    print(f"  Found {len(cluster_files)} clusters to process")
+    print(f"  Clusters: {len(cluster_files)}")
 
     # ── Determine parallelism ────────────────────────────────────
     n_cpus = multiprocessing.cpu_count()
@@ -2202,9 +2257,8 @@ def determine_consensus_parallel(output_dir, total_threads=8,
 
     threads_per_worker = max(1, total_threads // n_workers)
 
-    print(f"  Parallelism: {n_workers} workers x {threads_per_worker} threads "
-          f"= {n_workers * threads_per_worker} threads "
-          f"({n_cpus} CPUs available)")
+    print(f"  Workers: {n_workers} x {threads_per_worker} threads "
+          f"({n_workers * threads_per_worker} total, {n_cpus} CPUs available)")
 
     # ── Validate medaka if needed ────────────────────────────────
     if medaka_model and medaka_model.lower() != "none":
@@ -2213,7 +2267,7 @@ def determine_consensus_parallel(output_dir, total_threads=8,
                 "Medaka not found. Install with: pip install medaka\n"
                 "Or disable with --medaka_model none"
             )
-        print(f"  Medaka model: {medaka_model}")
+        print(f"  Medaka: {medaka_model}")
 
     # ── Launch workers ───────────────────────────────────────────
     succeeded = 0
@@ -2253,8 +2307,7 @@ def determine_consensus_parallel(output_dir, total_threads=8,
 
             if done_count % 100 == 0 or done_count == len(cluster_files):
                 print(f"  Progress: {done_count}/{len(cluster_files)} "
-                      f"(ok={succeeded}, rejected={purity_rejected}, "
-                      f"err={failed})")
+                      f"(ok={succeeded}, skipped={purity_rejected}, failed={failed})")
 
             try:
                 res = fut.result()
@@ -2275,49 +2328,18 @@ def determine_consensus_parallel(output_dir, total_threads=8,
                 succeeded += 1
                 total_filtered_out += n_out
                 total_reads_kept += n_kept
-                method = res.get('consensus_method', 'unknown')
-                parts = [f"reads: {n_kept}/{n_total} kept", f"method: {method}"]
-                if n_out > 0:
-                    parts.append(f"{n_out} filtered out")
-                if res.get('n_polish_reads') is not None and res['n_polish_reads'] != n_kept:
-                    parts.append(f"polish_reads={res['n_polish_reads']}")
-                if res.get('snap_edits', 0) > 0:
-                    parts.append(f"snap_edits={res['snap_edits']}")
-                if res.get('flank_edits', 0) > 0:
-                    parts.append(f"flank_edits={res['flank_edits']}")
-                if res.get('barcode_filter'):
-                    parts.append(f"barcode_filter={res['barcode_filter']}")
-                if res.get('barcode_interval_retry'):
-                    parts.append(f"barcode_retry={res['barcode_interval_retry']}")
-                if res.get('snap_warning'):
-                    parts.append(res['snap_warning'])
-                if res.get('flank_warning'):
-                    parts.append(res['flank_warning'])
-                if res.get('medaka_warning'):
-                    parts.append(f"medaka: {res['medaka_warning']}")
-                if res.get('racon_warning'):
-                    parts.append(f"racon: {res['racon_warning']}")
-                if res.get('polish_warning'):
-                    parts.append(f"WARNING: {res['polish_warning']}")
-                if res.get('polish_changes') is not None:
-                    parts.append(f"polish_changes={res['polish_changes']}")
-                print(f"  {cid}: OK — {', '.join(parts)}")
+                print(f"  {_format_cluster_status(res)}")
             elif status == 'purity_rejected':
                 purity_rejected += 1
                 total_filtered_out += n_total  # entire cluster rejected
-                fs = res.get('filter_stats', {})
-                print(f"  {cid}: REJECTED — reads: {n_kept}/{n_total} in dominant cluster — "
-                      f"{fs.get('reason', '?')}")
+                print(f"  {_format_cluster_status(res)}")
             else:
                 failed += 1
-                print(f"  {cid}: {status}")
+                print(f"  {_format_cluster_status(res)}")
 
     print(f"\n  === Summary ===")
-    print(f"  Clusters succeeded:  {succeeded}")
-    print(f"  Clusters rejected:   {purity_rejected}")
-    print(f"  Clusters failed:     {failed}")
-    print(f"  Reads kept:          {total_reads_kept}")
-    print(f"  Reads filtered out:  {total_filtered_out}")
+    print(f"  Clusters: {succeeded} ok, {purity_rejected} skipped, {failed} failed")
+    print(f"  Reads: {total_reads_kept} kept, {total_filtered_out} removed")
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -2326,13 +2348,13 @@ def determine_consensus_parallel(output_dir, total_threads=8,
 
 def determine_consensus(threads, input_fn, medaka_model,
                         barcode_template=None, left_coding_flank=None,
-                        right_coding_flank=None, max_mismatches=5, max_indels=3,
-                        min_window_score=0.7, min_identity=0.85,
-                        min_dominant_fraction=0.5,
+                        right_coding_flank=None, max_mismatches=6, max_indels=4,
+                        min_window_score=0.65, min_identity=0.83,
+                        min_dominant_fraction=0.4,
                         min_overlap_fraction=DEFAULT_MIN_OVERLAP_FRACTION,
                         min_aligned_bases=DEFAULT_MIN_ALIGNED_BASES,
                         racon_rounds=2,
-                        max_polish_reads=24,
+                        max_polish_reads=50,
                         keep_intermediates=False):
     """Single-cluster entry point. Calls the worker function directly."""
     result = _process_one_cluster(
@@ -2362,30 +2384,11 @@ def determine_consensus(threads, input_fn, medaka_model,
     n_out = result.get('n_filtered_out', 0)
 
     if status == 'ok':
-        parts = [f"reads: {n_kept}/{n_total} kept"]
-        if n_out > 0:
-            parts.append(f"{n_out} filtered out")
-        if result.get('n_polish_reads') is not None and result['n_polish_reads'] != n_kept:
-            parts.append(f"polish_reads={result['n_polish_reads']}")
-        if result.get('barcode_filter'):
-            parts.append(f"barcode_filter={result['barcode_filter']}")
-        if result.get('barcode_interval_retry'):
-            parts.append(f"barcode_retry={result['barcode_interval_retry']}")
-        if result.get('snap_edits', 0) > 0:
-            parts.append(f"snap_edits={result['snap_edits']}")
-        if result.get('flank_edits', 0) > 0:
-            parts.append(f"flank_edits={result['flank_edits']}")
-        if result.get('snap_warning'):
-            parts.append(result['snap_warning'])
-        if result.get('flank_warning'):
-            parts.append(result['flank_warning'])
-        print(f"  {cid}: OK — {', '.join(parts)}")
+        print(f"  {_format_cluster_status(result)}")
     elif status == 'purity_rejected':
-        fs = result.get('filter_stats', {})
-        print(f"  {cid}: SKIPPED — reads: {n_kept}/{n_total} in dominant cluster — "
-              f"{fs.get('reason', '?')}")
+        print(f"  {_format_cluster_status(result)}")
     else:
-        print(f"  {cid}: {status}")
+        print(f"  {_format_cluster_status(result)}")
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -2395,113 +2398,108 @@ def determine_consensus(threads, input_fn, medaka_model,
 def cli():
     parser = argparse.ArgumentParser(
         description="Generate consensus: purity filter -> minimap2 draft -> "
-                    "Medaka with optional barcode diagnostics. "
-                    "Provide --output_dir to process all clusters (parallel), "
-                    "or --input_fn for a single cluster."
+                    "polishing, with optional barcode diagnostics. Provide "
+                    "--output_dir to process all clusters in parallel, or "
+                    "--input_fn for a single cluster FASTQ."
     )
 
     # Mutually exclusive: batch vs single
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--output_dir', type=str, default=None,
-                      help='Directory containing clusters/ -- processes ALL clusters')
+                      help='Pipeline output directory containing clusters/. '
+                           'Processes all clusters under clusters/full_seqs/.')
     mode.add_argument('--input_fn', type=str, default=None,
-                      help='Single cluster FASTQ file to process')
+                      help='Single cluster FASTQ file to process.')
 
     # Shared parameters
     parser.add_argument("--threads", type=int, default=8,
                         help="Total thread budget (split across workers in "
                              "parallel mode, default: 8)")
-    parser.add_argument("--n_workers", type=int, default=None,
-                        help="Number of parallel workers (default: auto, "
-                             "= min(n_clusters, n_cpus/2))")
-    parser.add_argument("--medaka_model", type=str, default="none")
+    parser.add_argument("--workers", dest="n_workers", type=int, default=None,
+                        help="Parallel worker count when processing an "
+                             "output_dir (default: auto).")
+    parser.add_argument("--n_workers", dest="n_workers", type=int, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--medaka_model", type=str, default="none",
+                        help="Medaka model name, or 'none' to skip Medaka and "
+                             "use the non-Medaka consensus path.")
     parser.add_argument("--racon_rounds", type=int, default=2,
                         help="Number of Racon polishing rounds when Medaka is "
                              "disabled (default: 2). More rounds can improve "
                              "accuracy but with diminishing returns past 2.")
-    parser.add_argument("--max_polish_reads", type=int, default=24,
+    parser.add_argument("--max_polish_reads", type=int, default=50,
                         help="Maximum reads to send into Racon/Medaka per "
-                             "cluster (default: 24). Use 0 or a negative "
+                             "cluster (default: 50). Use 0 or a negative "
                              "value to disable capping.")
+    parser.add_argument("--strictness", choices=tuple(CONSENSUS_STRICTNESS_PRESETS),
+                        default="default",
+                        help="Consensus filtering preset. 'relaxed' keeps more "
+                             "reads, 'strict' filters harder, 'default' is the "
+                             "recommended balance.")
     parser.add_argument("--barcode_template", type=str, default=None,
                         help="Degenerate barcode template (IUPAC codes). "
                              "If provided, the consensus is scanned for the "
                              "best-matching barcode interval for diagnostics "
-                             "and flank anchoring.")
+                             "and barcode interval recalculation.")
     parser.add_argument("--left_coding_flank", type=str, default=None,
                         help="Optional left coding flank to snap exactly in the "
                              "final consensus before mapping.")
     parser.add_argument("--right_coding_flank", type=str, default=None,
                         help="Optional right coding flank to snap exactly in the "
                              "final consensus before mapping.")
-    parser.add_argument("--max_mismatches", type=int, default=5,
-                        help="Max substitution errors for barcode snapping "
-                             "(default: 5)")
-    parser.add_argument("--max_indels", type=int, default=3,
-                        help="Max indels for barcode snapping (default: 3)")
-    parser.add_argument("--min_window_score", type=float, default=0.7,
-                        help="Minimum fraction of positions matching template "
-                             "to accept a window as the barcode region "
-                             "(default: 0.7)")
+    parser.add_argument("--max_mismatches", type=int, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--max_indels", type=int, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--min_window_score", type=float, default=None,
+                        help=argparse.SUPPRESS)
 
-    # Purity filter parameters
-    parser.add_argument("--min_identity", type=float, default=0.85,
-                        help="Minimum pairwise alignment identity for reads "
-                             "to be considered part of the same sub-cluster "
-                             "(default: 0.85)")
-    parser.add_argument("--min_dominant_fraction", type=float, default=0.5,
-                        help="Minimum fraction of reads in the dominant "
-                             "sub-cluster to proceed with consensus. Clusters "
-                             "below this are skipped entirely (default: 0.5)")
+    # Expert-only filter overrides
+    parser.add_argument("--min_identity", type=float, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--min_dominant_fraction", type=float, default=None,
+                        help=argparse.SUPPRESS)
     parser.add_argument("--min_overlap_fraction", type=float,
-                        default=DEFAULT_MIN_OVERLAP_FRACTION,
-                        help="Minimum fraction of the shorter read that must "
-                             "be covered by an overlap for that read pair to "
-                             "enter the purity graph (default: "
-                             f"{DEFAULT_MIN_OVERLAP_FRACTION})")
+                        default=None,
+                        help=argparse.SUPPRESS)
     parser.add_argument("--min_aligned_bases", type=int,
-                        default=DEFAULT_MIN_ALIGNED_BASES,
-                        help="Minimum aligned span in bases for an overlap to "
-                             "enter the purity graph (default: "
-                             f"{DEFAULT_MIN_ALIGNED_BASES})")
+                        default=None,
+                        help=argparse.SUPPRESS)
 
     parser.add_argument("--timeout", type=int, default=3600,
                         help="Timeout in seconds for subprocess calls "
                              "(default: 3600 = 1h)")
     parser.add_argument("--keep_intermediates", action="store_true",
-                        help="Keep draft FASTAs, medaka dirs, and PAFs for debugging")
+                        help="Keep draft FASTAs, Medaka directories, and PAFs "
+                             "for debugging.")
 
     args = parser.parse_args()
+    advanced_overrides = _apply_consensus_strictness(args)
 
     global TIMEOUT
     TIMEOUT = args.timeout
 
     print(f"=== DNABARMAP Consensus ===")
-    print(f"Purity filter: min_identity={args.min_identity}, "
-          f"min_dominant_fraction={args.min_dominant_fraction}")
-    print(f"  Overlap graph: min_overlap_fraction={args.min_overlap_fraction}, "
-          f"min_aligned_bases={args.min_aligned_bases}")
+    print(f"Settings:")
+    print(f"  Strictness: {args.strictness}")
+    if advanced_overrides:
+        print(f"  Expert overrides: on")
 
     if args.barcode_template:
-        print(f"Barcode diagnostics: ON")
-        print(f"  Template:  {args.barcode_template[:40]}... "
-              f"({len(args.barcode_template)}bp)")
-        print(f"  Max mismatches: {args.max_mismatches}, "
-              f"Max indels: {args.max_indels}")
-        print(f"  Min window score: {args.min_window_score}")
+        print(f"  Barcode diagnostics: on ({len(args.barcode_template)} bp template)")
 
     if args.medaka_model and args.medaka_model.lower() != "none":
         args.medaka_model = _resolve_medaka_model(args.medaka_model)
-        print(f"Polishing: Medaka (model={args.medaka_model})")
+        print(f"  Polishing: medaka")
     else:
-        print(f"Polishing: Racon ({args.racon_rounds} round(s))")
+        print(f"  Polishing: racon ({args.racon_rounds} round(s))")
     if args.max_polish_reads <= 0:
         args.max_polish_reads = None
-        print("Polish read cap: disabled")
+        print("  Polish read cap: disabled")
     else:
-        print(f"Polish read cap: {args.max_polish_reads}")
+        print(f"  Polish read cap: {args.max_polish_reads}")
 
-    print(f"Timeout: {TIMEOUT}s ({TIMEOUT / 3600:.1f}h)")
+    print(f"  Timeout: {TIMEOUT / 3600:.1f}h")
     start = time.time()
 
     if args.output_dir:
