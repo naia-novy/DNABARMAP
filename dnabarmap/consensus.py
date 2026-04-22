@@ -19,10 +19,13 @@ from Bio.SeqRecord import SeqRecord
 from os import remove, makedirs, path
 from pathlib import Path
 from glob import glob
+import os
+import signal
 import subprocess
 import argparse
 import time
 import shutil
+import uuid
 import re
 import csv
 import tempfile
@@ -32,7 +35,10 @@ import multiprocessing
 import statistics
 import sys
 
+from dnabarmap.utils import get_cluster_shard_dir
+
 TIMEOUT = 3600  # 1 hour timeout for all subprocess calls
+TIMEOUT_KILL_GRACE_SECONDS = 5
 DEFAULT_MIN_OVERLAP_FRACTION = 0.5
 DEFAULT_MIN_ALIGNED_BASES = 80
 CONSENSUS_STRICTNESS_PRESETS = {
@@ -87,6 +93,65 @@ IUPAC = {
     'H': {'A', 'C', 'T'}, 'V': {'A', 'C', 'G'},
     'N': {'A', 'C', 'G', 'T'},
 }
+
+
+def _terminate_process_group(proc, grace_seconds=TIMEOUT_KILL_GRACE_SECONDS):
+    """Terminate a subprocess and any children it spawned."""
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    try:
+        proc.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    proc.wait()
+
+
+def _run_subprocess(cmd, *, timeout=None, check=False, **kwargs):
+    """
+    Run a subprocess in its own process group so a timeout can kill the entire
+    spawned tree, not just the immediate wrapper process.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        start_new_session=True,
+        **kwargs,
+    )
+
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=1)
+        except Exception:
+            stdout = None
+            stderr = None
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout,
+                                        output=stdout, stderr=stderr)
+
+    completed = subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(
+            proc.returncode,
+            cmd,
+            output=stdout,
+            stderr=stderr,
+        )
+    return completed
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -864,7 +929,7 @@ def _build_fullread_barcode_consensus(input_fq, consensus_seq, barcode_template,
             "fasta",
         )
 
-        result = subprocess.run(
+        result = _run_subprocess(
             ["minimap2", "-x", "map-ont", "-c", consensus_fasta, input_fq],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1323,6 +1388,227 @@ def snap_coding_flanks_in_consensus(consensus_seq, left_coding_flank,
     }
 
 
+def _write_single_sequence_fasta(sequence, fasta_path, record_id):
+    SeqIO.write(
+        SeqRecord(Seq(sequence), id=record_id, description=""),
+        fasta_path,
+        "fasta",
+    )
+
+
+def _apply_final_consensus_corrections(cluster_fq, filtered_fq, consensus_seq,
+                                       barcode_template, max_mismatches,
+                                       max_indels, left_coding_flank=None,
+                                       right_coding_flank=None):
+    corrected_seq = consensus_seq
+    authoritative_barcode = None
+    authoritative_barcode_stats = None
+    preferred_coding_len = None
+    flank_stats = None
+    barcode_reinjection_edits = 0
+
+    if barcode_template:
+        authoritative_barcode, authoritative_barcode_stats = _build_fullread_barcode_consensus(
+            cluster_fq,
+            consensus_seq=corrected_seq,
+            barcode_template=barcode_template,
+            max_mismatches=max_mismatches,
+            max_indels=max_indels,
+        )
+        interval = None if authoritative_barcode_stats is None else authoritative_barcode_stats.get('interval')
+        if authoritative_barcode and interval:
+            injected_seq, _ = _inject_barcode_at_interval(
+                corrected_seq,
+                authoritative_barcode,
+                interval[0],
+                interval[1],
+            )
+            if injected_seq is not None and injected_seq != corrected_seq:
+                barcode_reinjection_edits = (
+                    sum(base_a != base_b for base_a, base_b in zip(corrected_seq, injected_seq))
+                    + abs(len(injected_seq) - len(corrected_seq))
+                )
+                corrected_seq = injected_seq
+
+    if left_coding_flank and right_coding_flank:
+        preferred_coding_len = _estimate_coding_length_from_reads(
+            filtered_fq,
+            left_coding_flank,
+            right_coding_flank,
+        )
+        corrected_with_flanks, flank_stats = snap_coding_flanks_in_consensus(
+            corrected_seq,
+            left_coding_flank=left_coding_flank,
+            right_coding_flank=right_coding_flank,
+            barcode_seq=authoritative_barcode,
+            preferred_coding_len=preferred_coding_len,
+        )
+        if not flank_stats.get('rejected'):
+            corrected_seq = corrected_with_flanks
+
+    return corrected_seq, {
+        'authoritative_barcode': authoritative_barcode,
+        'authoritative_barcode_stats': authoritative_barcode_stats,
+        'preferred_coding_len': preferred_coding_len,
+        'flank_stats': flank_stats,
+        'barcode_reinjection_edits': barcode_reinjection_edits,
+    }
+
+
+def _record_correction_stats(result, correction_info, original_seq, corrected_seq):
+    authoritative_barcode_stats = correction_info.get('authoritative_barcode_stats')
+    flank_stats = correction_info.get('flank_stats')
+
+    if authoritative_barcode_stats is not None:
+        result['n_barcode_consensus_reads'] = authoritative_barcode_stats.get('n_used', 0)
+        if authoritative_barcode_stats.get('right_shift_retry'):
+            result['barcode_interval_retry'] = 'end+1'
+        elif authoritative_barcode_stats.get('left_shift_retry'):
+            result['barcode_interval_retry'] = f"start-{authoritative_barcode_stats['left_shift_retry']}"
+        elif authoritative_barcode_stats.get('projected_local_retry'):
+            result['barcode_interval_retry'] = 'projected_local'
+        else:
+            result.pop('barcode_interval_retry', None)
+        tail_ratio = authoritative_barcode_stats.get('tail_penultimate_ratio')
+        if tail_ratio is not None:
+            result['barcode_tail_penult'] = tail_ratio
+        head_ratio = authoritative_barcode_stats.get('head_first_ratio')
+        if head_ratio is not None:
+            result['barcode_head_first'] = head_ratio
+        if authoritative_barcode_stats.get('total_edits', 0) > 0:
+            result['barcode_consensus_edits'] = authoritative_barcode_stats['total_edits']
+        else:
+            result.pop('barcode_consensus_edits', None)
+    else:
+        result.pop('n_barcode_consensus_reads', None)
+        result.pop('barcode_interval_retry', None)
+        result.pop('barcode_tail_penult', None)
+        result.pop('barcode_head_first', None)
+        result.pop('barcode_consensus_edits', None)
+
+    if corrected_seq != original_seq and correction_info.get('barcode_reinjection_edits', 0) > 0:
+        result['barcode_reinjected'] = True
+        result['barcode_reinjection_edits'] = correction_info['barcode_reinjection_edits']
+    else:
+        result.pop('barcode_reinjected', None)
+        result.pop('barcode_reinjection_edits', None)
+
+    preferred_coding_len = correction_info.get('preferred_coding_len')
+    if preferred_coding_len is not None:
+        result['preferred_coding_len'] = preferred_coding_len
+    else:
+        result.pop('preferred_coding_len', None)
+
+    if flank_stats is not None:
+        if not flank_stats.get('rejected'):
+            if flank_stats.get('total_edits', 0) > 0:
+                result['flank_edits'] = flank_stats['total_edits']
+            else:
+                result.pop('flank_edits', None)
+            result.pop('flank_warning', None)
+        else:
+            result['flank_warning'] = flank_stats.get('reason', 'unknown')
+            result.pop('flank_edits', None)
+    else:
+        result.pop('flank_edits', None)
+        result.pop('flank_warning', None)
+
+
+def _summarize_consensus_support(input_fq, consensus_seq, threads=1):
+    if not input_fq or not path.exists(input_fq) or not consensus_seq:
+        return None
+
+    with tempfile.TemporaryDirectory(prefix='dnabarmap_consensus_support_') as temp_dir:
+        consensus_fasta = path.join(temp_dir, "consensus.fasta")
+        _write_single_sequence_fasta(consensus_seq.upper(), consensus_fasta, "consensus")
+        result = _run_subprocess(
+            ["minimap2", "-x", "map-ont", "-c", "-t", str(threads), consensus_fasta, input_fq],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=TIMEOUT,
+        )
+        if result.returncode != 0:
+            return {
+                'rejected': True,
+                'reason': 'support_map_failed',
+                'stderr_tail': result.stderr[-500:],
+            }
+
+    best_by_read = {}
+    for line in result.stdout.splitlines():
+        if not line or line.startswith('['):
+            continue
+        cols = line.split('\t')
+        if len(cols) < 11:
+            continue
+        qname = cols[0]
+        qlen = int(cols[1])
+        qstart = int(cols[2])
+        qend = int(cols[3])
+        tstart = int(cols[7])
+        tend = int(cols[8])
+        nmatch = int(cols[9])
+        aln_len = int(cols[10])
+        if aln_len <= 0 or qlen <= 0:
+            continue
+        metrics = {
+            'identity': nmatch / aln_len,
+            'consensus_coverage': (tend - tstart) / max(1, len(consensus_seq)),
+            'read_coverage': (qend - qstart) / qlen,
+            'aln_len': aln_len,
+        }
+        prev = best_by_read.get(qname)
+        if prev is None or metrics['aln_len'] > prev['aln_len']:
+            best_by_read[qname] = metrics
+
+    if not best_by_read:
+        return {
+            'rejected': True,
+            'reason': 'no_support_alignments',
+        }
+
+    identities = sorted(m['identity'] for m in best_by_read.values())
+    consensus_coverages = sorted(m['consensus_coverage'] for m in best_by_read.values())
+    read_coverages = sorted(m['read_coverage'] for m in best_by_read.values())
+    p10_idx = max(0, int(len(identities) * 0.1) - 1)
+
+    return {
+        'rejected': False,
+        'n_aligned': len(best_by_read),
+        'median_identity': round(statistics.median(identities), 4),
+        'p10_identity': round(identities[p10_idx], 4),
+        'median_consensus_coverage': round(statistics.median(consensus_coverages), 4),
+        'p10_consensus_coverage': round(consensus_coverages[p10_idx], 4),
+        'median_read_coverage': round(statistics.median(read_coverages), 4),
+        'p10_read_coverage': round(read_coverages[p10_idx], 4),
+    }
+
+
+def _should_run_full_refine_fallback(result, correction_info, support_stats):
+    authoritative_barcode_stats = correction_info.get('authoritative_barcode_stats') or {}
+    flank_stats = correction_info.get('flank_stats') or {}
+
+    fallback_reasons = []
+    if result.get('polish_warning'):
+        fallback_reasons.append('polish_no_effect')
+    if authoritative_barcode_stats.get('right_shift_retry'):
+        fallback_reasons.append('barcode_shift_right')
+    if authoritative_barcode_stats.get('left_shift_retry'):
+        fallback_reasons.append('barcode_shift_left')
+    if authoritative_barcode_stats.get('projected_local_retry'):
+        fallback_reasons.append('barcode_projected_retry')
+    if flank_stats.get('rejected'):
+        fallback_reasons.append('flank_rejected')
+    if support_stats and not support_stats.get('rejected'):
+        if support_stats.get('median_consensus_coverage', 1.0) < 0.9:
+            fallback_reasons.append('low_consensus_coverage')
+        elif support_stats.get('p10_consensus_coverage', 1.0) < 0.75:
+            fallback_reasons.append('partial_consensus_tail')
+
+    return fallback_reasons
+
+
 def filter_cluster_reads_by_barcode(input_fq, barcode_template,
                                     max_mismatches=5, max_indels=3,
                                     min_window_score=0.7,
@@ -1573,6 +1859,78 @@ def _resolve_medaka_model(model):
     return model
 
 
+def _format_log_tail(log_content, max_chars=2000, max_lines=40):
+    if not log_content:
+        return "(no log output captured)"
+
+    lines = [line.rstrip() for line in log_content.splitlines()]
+    non_empty = [line for line in lines if line.strip()]
+    if not non_empty:
+        return "(log contained only blank lines)"
+
+    tail_lines = non_empty[-max_lines:]
+    tail = "\n".join(tail_lines)
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+    return tail
+
+
+def _extract_medaka_failure_summary(log_content, allow_generic=False):
+    if not log_content:
+        return None
+
+    lines = [re.sub(r'\s+', ' ', line).strip()
+             for line in log_content.splitlines()
+             if line.strip()]
+    if not lines:
+        return None
+
+    strong_markers = (
+        "Failed to run alignment",
+        "Failed to run inference",
+        "Failed to run sequence",
+        "FileNotFoundError",
+        "No such file or directory",
+        "is not a recognised basecaller model",
+        "is not a recognized basecaller model",
+        "Traceback (most recent call last)",
+        "Segmentation fault",
+        "Killed",
+    )
+
+    for marker in strong_markers:
+        for idx, line in enumerate(lines):
+            if marker in line:
+                if marker == "Traceback (most recent call last)":
+                    for follow in reversed(lines[idx + 1:]):
+                        if follow and "Traceback (most recent call last)" not in follow:
+                            return follow
+                return line
+
+    if allow_generic:
+        generic_patterns = (
+            re.compile(r'\b(error|failed|exception)\b', re.IGNORECASE),
+            re.compile(r'^\[[^\]]+\]\s*error', re.IGNORECASE),
+        )
+        for line in reversed(lines):
+            if any(pattern.search(line) for pattern in generic_patterns):
+                return line
+
+    return None
+
+
+def _medaka_runtime_error(prefix, cmd, log_content, detail=None):
+    tail = _format_log_tail(log_content)
+    first_line = prefix
+    if detail:
+        first_line = f"{first_line}: {detail}"
+    return RuntimeError(
+        f"{first_line}\n"
+        f"CMD: {' '.join(cmd)}\n"
+        f"LOG tail:\n{tail}"
+    )
+
+
 def run_medaka(input_reads, draft_fasta, output_dir, model, threads):
     """
     Run Medaka polishing via `medaka_consensus`.
@@ -1600,7 +1958,7 @@ def run_medaka(input_reads, draft_fasta, output_dir, model, threads):
     log_file = path.join(output_dir, "medaka.log")
 
     with open(log_file, "w") as log_handle:
-        result = subprocess.run(
+        result = _run_subprocess(
             cmd,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
@@ -1613,47 +1971,50 @@ def run_medaka(input_reads, draft_fasta, output_dir, model, threads):
         with open(log_file) as f:
             log_content = f.read()
 
-    # medaka_consensus bash script doesn't always propagate errors
-    # via exit code, so check the log for failure signatures
-    failure_signatures = [
-        "Failed to run alignment",
-        "Failed to run inference",
-        "Failed to run sequence",
-        "Error:",
-        "Traceback (most recent call last)",
-        "FileNotFoundError",
-        "No such file or directory",
-        "is not a recognised basecaller model",
-    ]
-    for sig in failure_signatures:
-        if sig in log_content:
-            raise RuntimeError(
-                f"medaka_consensus failed internally ({sig})\n"
-                f"CMD: {' '.join(cmd)}\n"
-                f"LOG (tail):\n{log_content[-2000:]}"
-            )
+    # medaka_consensus bash script does not always propagate internal failures
+    # via exit code, so inspect the log for high-confidence failure markers.
+    internal_failure = _extract_medaka_failure_summary(log_content)
+    if internal_failure:
+        raise _medaka_runtime_error(
+            "medaka_consensus failed internally",
+            cmd,
+            log_content,
+            detail=internal_failure,
+        )
 
     if result.returncode != 0:
-        raise RuntimeError(
-            f"medaka_consensus failed (exit {result.returncode})\n"
-            f"CMD: {' '.join(cmd)}\n"
-            f"LOG (tail):\n{log_content[-2000:]}"
+        failure_detail = _extract_medaka_failure_summary(
+            log_content,
+            allow_generic=True,
+        )
+        raise _medaka_runtime_error(
+            f"medaka_consensus failed (exit {result.returncode})",
+            cmd,
+            log_content,
+            detail=failure_detail,
         )
 
     # medaka_consensus outputs to consensus.fasta in the output dir
     consensus_out = path.join(output_dir, "consensus.fasta")
 
-    if not path.exists(consensus_out):
+    if not path.exists(consensus_out) or path.getsize(consensus_out) == 0:
         fastas = glob(path.join(output_dir, "*.fasta"))
         fastas = [f for f in fastas
                   if 'draft' not in path.basename(f).lower()
-                  and path.basename(f) != path.basename(draft_fasta)]
+                  and path.basename(f) != path.basename(draft_fasta)
+                  and path.getsize(f) > 0]
         if fastas:
             consensus_out = fastas[0]
         else:
-            raise RuntimeError(
-                f"medaka_consensus produced no FASTA output in {output_dir}\n"
-                f"LOG (tail):\n{log_content[-2000:]}"
+            failure_detail = _extract_medaka_failure_summary(
+                log_content,
+                allow_generic=True,
+            )
+            raise _medaka_runtime_error(
+                f"medaka_consensus produced no FASTA output in {output_dir}",
+                cmd,
+                log_content,
+                detail=failure_detail,
             )
 
     return consensus_out
@@ -1686,7 +2047,7 @@ def run_racon(input_reads, draft_fasta, output_dir, threads, rounds=1):
 
         # Align reads to current draft
         with open(paf, "w") as paf_handle:
-            result = subprocess.run(
+            result = _run_subprocess(
                 ["minimap2", "-x", "map-ont", "-t", str(threads),
                  current_draft, input_reads],
                 stdout=paf_handle,
@@ -1701,7 +2062,7 @@ def run_racon(input_reads, draft_fasta, output_dir, threads, rounds=1):
 
         # Run Racon
         with open(out, "w") as out_handle:
-            result = subprocess.run(
+            result = _run_subprocess(
                 ["racon", "-t", str(threads),
                  input_reads, paf, current_draft],
                 stdout=out_handle,
@@ -1756,23 +2117,28 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
 
     cluster_id = Path(cluster_fq).stem
     consensus_dir = cluster_fq.split('clusters')[0] + '/consensus/'
-    sub_dir = consensus_dir + cluster_id[-2:]
-    medaka_dir = f"{sub_dir}/{cluster_id}_medaka"
+    sub_dir = get_cluster_shard_dir(cluster_id, consensus_dir)
 
-    makedirs(sub_dir, exist_ok=True)
+    work_dir = path.join(sub_dir, f"{cluster_id}_work_{uuid.uuid4().hex[:8]}")
+    makedirs(work_dir, exist_ok=True)
+
+    work_cluster_fq = path.join(work_dir, path.basename(cluster_fq))
+    shutil.copy2(cluster_fq, work_cluster_fq)
+
+    medaka_dir = f"{work_dir}/{cluster_id}_medaka"
 
     final_consensus = f"{sub_dir}/{cluster_id}_consensus.fasta"
-    draft_fasta = f"{sub_dir}/{cluster_id}_draft.fasta"
-    paf_file = f"{sub_dir}/{cluster_id}.paf"
+    draft_fasta = f"{work_dir}/{cluster_id}_draft.fasta"
+    paf_file = f"{work_dir}/{cluster_id}.paf"
 
     result = {'cluster_id': cluster_id, 'status': 'ok'}
 
     # ── Step 1: minimap2 self-map ────────────────────────────────
     try:
         with open(paf_file, "w") as paf_handle:
-            map_result = subprocess.run(
+            map_result = _run_subprocess(
                 ["minimap2", "-x", "ava-ont", "-c", "-t", str(threads),
-                 cluster_fq, cluster_fq],
+                 work_cluster_fq, work_cluster_fq],
                 stdout=paf_handle,
                 stderr=subprocess.PIPE,
                 timeout=TIMEOUT
@@ -1784,14 +2150,18 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
         result['status'] = 'timeout_selfmap'
         if path.exists(paf_file):
             remove(paf_file)
+        if not keep_intermediates and path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
         return result
     except Exception as e:
         result['status'] = f'error_selfmap: {e}'
+        if not keep_intermediates and path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
         return result
 
     # ── Step 2: Purity filter ────────────────────────────────────
     filtered_fq, draft_support, filter_stats = filter_cluster_reads(
-        cluster_fq, paf_file,
+        work_cluster_fq, paf_file,
         min_identity=min_identity,
         min_dominant_fraction=min_dominant_fraction,
         min_overlap_fraction=min_overlap_fraction,
@@ -1815,7 +2185,7 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
     should_try_barcode_filter = barcode_template and barcode_filter_input_n >= 8
 
     if should_try_barcode_filter:
-        barcode_filter_input = filtered_fq if filtered_fq is not None else cluster_fq
+        barcode_filter_input = filtered_fq if filtered_fq is not None else work_cluster_fq
         barcode_filtered_fq, barcode_keep_ids, barcode_filter_stats = filter_cluster_reads_by_barcode(
             barcode_filter_input,
             barcode_template=barcode_template,
@@ -1831,20 +2201,15 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
         result['filter_stats'] = filter_stats
         if barcode_filter_stats is not None:
             result['barcode_filter_stats'] = barcode_filter_stats
+        if not keep_intermediates and path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
         return result
 
-    use_barcode_filter = False
-    if barcode_filtered_fq is not None:
-        barcode_n_kept = barcode_filter_stats.get('n_kept', result['n_total'])
-        fullread_n_kept = filter_stats.get('n_kept', result['n_total'])
-        use_barcode_filter = (
-            filtered_fq is None or
-            barcode_n_kept >= max(4, int(fullread_n_kept * 0.8))
-        )
+    use_barcode_filter = filtered_fq is None and barcode_filtered_fq is not None
 
     if use_barcode_filter:
-        if filtered_fq and filtered_fq != cluster_fq and filtered_fq != barcode_filtered_fq:
-            _cleanup_filtered(filtered_fq, cluster_fq)
+        if filtered_fq and filtered_fq != work_cluster_fq and filtered_fq != barcode_filtered_fq:
+            _cleanup_filtered(filtered_fq, work_cluster_fq)
         filtered_fq = barcode_filtered_fq
         result['n_kept'] = barcode_filter_stats.get('n_kept', result['n_kept'])
         result['n_filtered_out'] = result['n_total'] - result['n_kept']
@@ -1854,8 +2219,12 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
                 f"{barcode_filter_stats.get('n_kept', 0)}/"
                 f"{barcode_filter_stats.get('n_total', 0)} kept"
             )
-    elif barcode_filtered_fq and barcode_filtered_fq != cluster_fq:
-        _cleanup_filtered(barcode_filtered_fq, cluster_fq)
+    elif (
+        barcode_filtered_fq
+        and barcode_filtered_fq != work_cluster_fq
+        and barcode_filtered_fq != filtered_fq
+    ):
+        _cleanup_filtered(barcode_filtered_fq, work_cluster_fq)
 
     # ── Step 3: Pick best draft read ─────────────────────────────
     filtered_records = list(SeqIO.parse(filtered_fq, "fastq"))
@@ -1865,7 +2234,9 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
 
     if not filtered_records:
         result['status'] = 'no_draft'
-        _cleanup_filtered(filtered_fq, cluster_fq)
+        _cleanup_filtered(filtered_fq, work_cluster_fq)
+        if not keep_intermediates and path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
         return result
 
     if not draft_support and barcode_keep_ids:
@@ -1874,10 +2245,14 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
     draft_record = _choose_draft_record(filtered_records, draft_support=draft_support)
     if draft_record is None:
         result['status'] = 'no_draft'
-        _cleanup_filtered(filtered_fq, cluster_fq)
+        _cleanup_filtered(filtered_fq, work_cluster_fq)
+        if not keep_intermediates and path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
         return result
 
-    SeqIO.write(draft_record, draft_fasta, "fasta")
+    # Give the draft a unique identifier so downstream polishers do not see
+    # the draft target as a duplicate of one of the input reads.
+    _write_single_sequence_fasta(str(draft_record.seq), draft_fasta, f"{cluster_id}_draft")
 
     polish_records = _select_polishing_records(
         filtered_records,
@@ -1894,9 +2269,9 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
         result['n_polish_reads'] = len(filtered_records)
 
     # ── Step 4: Polishing ────────────────────────────────────────
-    pileup_dir = f"{sub_dir}/{cluster_id}_pileup"
-    racon_dir = f"{sub_dir}/{cluster_id}_racon"
-    full_refine_dir = f"{sub_dir}/{cluster_id}_full_refine"
+    pileup_dir = f"{work_dir}/{cluster_id}_pileup"
+    racon_dir = f"{work_dir}/{cluster_id}_racon"
+    full_refine_dir = f"{work_dir}/{cluster_id}_full_refine"
 
     if medaka_model and medaka_model.lower() != "none":
         # Full Medaka polishing
@@ -1962,48 +2337,86 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
     consensus_seq = _load_single_fasta_sequence(polished)
     if consensus_seq is None:
         result['status'] = 'no_consensus'
-        _cleanup_filtered(filtered_fq, cluster_fq)
+        _cleanup_filtered(filtered_fq, work_cluster_fq)
+        if not keep_intermediates and path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
         return result
 
-    # ── Step 4b: whole-sequence iterative refinement ────────────
+    # ── Diagnostic: check if polishing actually changed the draft ─
+    if path.exists(draft_fasta):
+        draft_seq = _load_single_fasta_sequence(draft_fasta)
+        if draft_seq is not None and consensus_seq == draft_seq:
+            result['polish_warning'] = 'consensus identical to draft (polishing had no effect)'
+
+    # ── Step 5: Final correction; full refine only as fallback ───
+    pre_correction_seq = consensus_seq
+    consensus_seq, correction_info = _apply_final_consensus_corrections(
+        work_cluster_fq,
+        filtered_fq,
+        consensus_seq,
+        barcode_template,
+        max_mismatches,
+        max_indels,
+        left_coding_flank=left_coding_flank,
+        right_coding_flank=right_coding_flank,
+    )
+    _record_correction_stats(result, correction_info, pre_correction_seq, consensus_seq)
+
     full_refine_rounds = 0
-    current_consensus_fasta = polished
-    refine_reads = polish_fq
-    if refine_reads and path.exists(refine_reads):
-        max_full_refine_rounds = 1 if medaka_model and medaka_model.lower() != "none" else 2
-        for round_idx in range(max_full_refine_rounds):
-            round_dir = path.join(full_refine_dir, f"round_{round_idx + 1}")
-            try:
-                if medaka_model and medaka_model.lower() != "none":
-                    refined_fasta = run_medaka(
-                        input_reads=refine_reads,
-                        draft_fasta=current_consensus_fasta,
-                        output_dir=round_dir,
-                        model=medaka_model,
-                        threads=threads,
-                    )
-                else:
-                    refined_fasta = run_racon(
-                        input_reads=refine_reads,
-                        draft_fasta=current_consensus_fasta,
-                        output_dir=round_dir,
-                        threads=threads,
-                        rounds=1,
-                    )
-            except subprocess.TimeoutExpired:
-                result['full_refine_warning'] = 'timeout'
-                break
-            except Exception as e:
-                result['full_refine_warning'] = str(e)
-                break
+    support_stats = _summarize_consensus_support(filtered_fq, consensus_seq, threads=threads)
+    if support_stats is not None:
+        if support_stats.get('rejected'):
+            result['consensus_support_warning'] = support_stats.get('reason', 'unknown')
+        else:
+            result['median_consensus_coverage'] = support_stats['median_consensus_coverage']
+            result['median_read_coverage'] = support_stats['median_read_coverage']
+            result['median_polish_identity'] = support_stats['median_identity']
+
+    full_refine_reasons = _should_run_full_refine_fallback(result, correction_info, support_stats)
+    if full_refine_reasons and polish_fq and path.exists(polish_fq):
+        round_dir = path.join(full_refine_dir, "round_1")
+        corrected_draft_fasta = path.join(full_refine_dir, f"{cluster_id}_corrected_draft.fasta")
+        makedirs(full_refine_dir, exist_ok=True)
+        _write_single_sequence_fasta(pre_correction_seq, corrected_draft_fasta, f"{cluster_id}_corrected")
+
+        try:
+            if medaka_model and medaka_model.lower() != "none":
+                refined_fasta = run_medaka(
+                    input_reads=polish_fq,
+                    draft_fasta=corrected_draft_fasta,
+                    output_dir=round_dir,
+                    model=medaka_model,
+                    threads=threads,
+                )
+            else:
+                refined_fasta = run_racon(
+                    input_reads=polish_fq,
+                    draft_fasta=corrected_draft_fasta,
+                    output_dir=round_dir,
+                    threads=threads,
+                    rounds=1,
+                )
 
             refined_seq = _load_single_fasta_sequence(refined_fasta)
-            if refined_seq is None or refined_seq == consensus_seq:
-                break
-
-            consensus_seq = refined_seq
-            current_consensus_fasta = refined_fasta
-            full_refine_rounds += 1
+            if refined_seq is not None and refined_seq != consensus_seq:
+                pre_correction_seq = refined_seq
+                consensus_seq, correction_info = _apply_final_consensus_corrections(
+                    work_cluster_fq,
+                    filtered_fq,
+                    refined_seq,
+                    barcode_template,
+                    max_mismatches,
+                    max_indels,
+                    left_coding_flank=left_coding_flank,
+                    right_coding_flank=right_coding_flank,
+                )
+                _record_correction_stats(result, correction_info, pre_correction_seq, consensus_seq)
+                full_refine_rounds = 1
+                result['full_refine_trigger'] = ','.join(full_refine_reasons)
+        except subprocess.TimeoutExpired:
+            result['full_refine_warning'] = 'timeout'
+        except Exception as e:
+            result['full_refine_warning'] = str(e)
 
     if full_refine_rounds > 0:
         result['full_refine_rounds'] = full_refine_rounds
@@ -2014,78 +2427,17 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
         elif result.get('consensus_method'):
             result['consensus_method'] = f"{result['consensus_method']} + full refine"
 
-    # ── Diagnostic: check if polishing actually changed the draft ─
-    if path.exists(draft_fasta):
-        draft_seq = _load_single_fasta_sequence(draft_fasta)
-        if draft_seq is not None and consensus_seq == draft_seq:
-            result['polish_warning'] = 'consensus identical to draft (polishing had no effect)'
-
-    # ── Step 5: Full-read barcode consensus and reinjection ──────
-    authoritative_barcode = None
-    if barcode_template:
-        authoritative_barcode, authoritative_barcode_stats = _build_fullread_barcode_consensus(
-            cluster_fq,
-            consensus_seq=consensus_seq,
-            barcode_template=barcode_template,
-            max_mismatches=max_mismatches,
-            max_indels=max_indels,
-        )
-        if authoritative_barcode_stats is not None:
-            result['n_barcode_consensus_reads'] = authoritative_barcode_stats.get('n_used', 0)
-            if authoritative_barcode_stats.get('right_shift_retry'):
-                result['barcode_interval_retry'] = 'end+1'
-            elif authoritative_barcode_stats.get('left_shift_retry'):
-                result['barcode_interval_retry'] = f"start-{authoritative_barcode_stats['left_shift_retry']}"
-            elif authoritative_barcode_stats.get('projected_local_retry'):
-                result['barcode_interval_retry'] = 'projected_local'
-            tail_ratio = authoritative_barcode_stats.get('tail_penultimate_ratio')
-            if tail_ratio is not None:
-                result['barcode_tail_penult'] = tail_ratio
-            head_ratio = authoritative_barcode_stats.get('head_first_ratio')
-            if head_ratio is not None:
-                result['barcode_head_first'] = head_ratio
-            if authoritative_barcode_stats.get('total_edits', 0) > 0:
-                result['barcode_consensus_edits'] = authoritative_barcode_stats['total_edits']
-        interval = None if authoritative_barcode_stats is None else authoritative_barcode_stats.get('interval')
-        if authoritative_barcode and interval:
-            corrected_seq, inject_stats = _inject_barcode_at_interval(
-                consensus_seq,
-                authoritative_barcode,
-                interval[0],
-                interval[1],
-            )
-            if corrected_seq is not None and corrected_seq != consensus_seq:
-                result['barcode_reinjected'] = True
-                result['barcode_reinjection_edits'] = sum(
-                    base_a != base_b
-                    for base_a, base_b in zip(consensus_seq, corrected_seq)
-                ) + abs(len(corrected_seq) - len(consensus_seq))
-                consensus_seq = corrected_seq
-
-    if left_coding_flank and right_coding_flank:
-        preferred_coding_len = _estimate_coding_length_from_reads(
-            filtered_fq,
-            left_coding_flank,
-            right_coding_flank,
-        )
-        if preferred_coding_len is not None:
-            result['preferred_coding_len'] = preferred_coding_len
-        corrected_seq, flank_stats = snap_coding_flanks_in_consensus(
-            consensus_seq,
-            left_coding_flank=left_coding_flank,
-            right_coding_flank=right_coding_flank,
-            barcode_seq=authoritative_barcode,
-            preferred_coding_len=preferred_coding_len,
-        )
-        if not flank_stats.get('rejected'):
-            consensus_seq = corrected_seq
-            if flank_stats.get('total_edits', 0) > 0:
-                result['flank_edits'] = flank_stats['total_edits']
-        else:
-            result['flank_warning'] = flank_stats.get('reason', 'unknown')
-
     # ── Write final consensus ────────────────────────────────────
-    record = SeqRecord(Seq(consensus_seq), id=cluster_id, description="")
+    header_fields = [
+        f"n_cluster_reads={result.get('n_total', 0)}",
+        f"n_consensus_reads={result.get('n_kept', 0)}",
+        f"n_polish_reads={result.get('n_polish_reads', 0)}",
+    ]
+    record = SeqRecord(
+        Seq(consensus_seq),
+        id=cluster_id,
+        description=" ".join(header_fields),
+    )
     SeqIO.write(record, final_consensus, "fasta")
 
     # ── Cleanup ──────────────────────────────────────────────────
@@ -2100,8 +2452,10 @@ def _process_one_cluster(cluster_fq, threads, medaka_model,
             shutil.rmtree(full_refine_dir, ignore_errors=True)
         if path.isdir(pileup_dir):
             shutil.rmtree(pileup_dir, ignore_errors=True)
-        _cleanup_filtered(filtered_fq, cluster_fq)
+        _cleanup_filtered(filtered_fq, work_cluster_fq)
         _cleanup_filtered(polish_fq, filtered_fq)
+        if path.isdir(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     return result
 
@@ -2110,6 +2464,27 @@ def _cleanup_filtered(filtered_fq, original_fq):
     """Remove the filtered FASTQ if it's a separate file."""
     if filtered_fq and filtered_fq != original_fq and path.exists(filtered_fq):
         remove(filtered_fq)
+
+
+def _is_consensus_intermediate_fastq(filename):
+    return path.basename(filename).endswith((
+        '_filtered.fastq',
+        '_barcode_filtered.fastq',
+        '_polish.fastq',
+    ))
+
+
+def _validate_consensus_input_fastq(input_fn):
+    if not input_fn:
+        raise ValueError("No input FASTQ provided for consensus")
+    if not path.exists(input_fn):
+        raise FileNotFoundError(f"Consensus input FASTQ not found: {input_fn}")
+    if _is_consensus_intermediate_fastq(input_fn):
+        raise ValueError(
+            "Consensus was given an intermediate FASTQ instead of an original cluster FASTQ: "
+            f"{input_fn}. Submit files like cluster_*.fastq from clusters/full_seqs/, "
+            "not *_filtered.fastq, *_barcode_filtered.fastq, or *_polish.fastq."
+        )
 
 
 def _apply_consensus_strictness(args):
@@ -2182,6 +2557,8 @@ def _format_cluster_status(res):
             warnings.append(_short_warning_text(res['snap_warning']))
         if res.get('flank_warning'):
             warnings.append(_short_warning_text(res['flank_warning']))
+        if res.get('consensus_support_warning'):
+            warnings.append(f"support: {_short_warning_text(res['consensus_support_warning'])}")
         if res.get('medaka_warning'):
             warnings.append(f"medaka fallback: {_short_warning_text(res['medaka_warning'])}")
         if res.get('racon_warning'):
@@ -2240,7 +2617,7 @@ def determine_consensus_parallel(output_dir, total_threads=8,
 
     cluster_files = [
         f for f in cluster_files
-        if not path.basename(f).endswith(('_filtered.fastq', '_barcode_filtered.fastq'))
+        if not _is_consensus_intermediate_fastq(f)
     ]
 
     if not cluster_files:
@@ -2357,6 +2734,7 @@ def determine_consensus(threads, input_fn, medaka_model,
                         max_polish_reads=50,
                         keep_intermediates=False):
     """Single-cluster entry point. Calls the worker function directly."""
+    _validate_consensus_input_fastq(input_fn)
     result = _process_one_cluster(
         cluster_fq=input_fn,
         threads=threads,
@@ -2427,9 +2805,9 @@ def cli():
                         help="Number of Racon polishing rounds when Medaka is "
                              "disabled (default: 2). More rounds can improve "
                              "accuracy but with diminishing returns past 2.")
-    parser.add_argument("--max_polish_reads", type=int, default=50,
+    parser.add_argument("--max_polish_reads", type=int, default=100,
                         help="Maximum reads to send into Racon/Medaka per "
-                             "cluster (default: 50). Use 0 or a negative "
+                             "cluster (default: 100). Use 0 or a negative "
                              "value to disable capping.")
     parser.add_argument("--strictness", choices=tuple(CONSENSUS_STRICTNESS_PRESETS),
                         default="default",

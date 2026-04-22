@@ -5,8 +5,25 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
 import gzip
 import uuid
+import hashlib
 
 _BACKEND_NOTE_PRINTED = False
+DEFAULT_CLUSTER_SHARDS = 2048
+
+
+def cluster_shard_name(cluster_id, n_shards=DEFAULT_CLUSTER_SHARDS):
+    """Return a stable shard directory name for a cluster identifier."""
+    digest = hashlib.blake2b(str(cluster_id).encode(), digest_size=8).digest()
+    shard = int.from_bytes(digest, byteorder="big") % int(n_shards)
+    width = max(3, len(format(int(n_shards) - 1, "x")))
+    return format(shard, f"0{width}x")
+
+
+def get_cluster_shard_dir(cluster_id, root_dir, n_shards=DEFAULT_CLUSTER_SHARDS):
+    """Create and return the shard directory for a cluster output file."""
+    sub_dir = os.path.join(root_dir, cluster_shard_name(cluster_id, n_shards=n_shards))
+    os.makedirs(sub_dir, exist_ok=True)
+    return sub_dir
 
 
 def import_cupy_numpy(print_note=False):
@@ -200,33 +217,36 @@ def write_full_fastq(sequences, directions, barcode_fn, full_fn, filtered_fn):
                     id=rec_id)
             )
     else:
-        for i, rec in enumerate(SeqIO.parse(full_fn, "fastq")):
-            if i in idx_to_barcode:
-                add_id = str(uuid.uuid4())[:6]
-                rec.id = add_id[:] + '-' + rec.id
-                if directions[i] == 1:  # reverse complement required
-                    new_seq = Seq(reverse_complement(str(rec.seq))) # reverse complement sequence
-                    new_quals = rec.letter_annotations["phred_quality"][::-1] # reverse quality scores
-                    rec = SeqRecord(
-                        new_seq,
-                        id=rec.id,
-                        description="",
-                        letter_annotations={"phred_quality": new_quals})
-                else:
-                    rec = SeqRecord(
-                        rec.seq,
-                        id=rec.id,
-                        description="",
-                        letter_annotations={"phred_quality": rec.letter_annotations["phred_quality"]})
+        open_fn = gzip.open if full_fn.endswith('.gz') else open
+        open_mode = "rt"
+        with open_fn(full_fn, open_mode) as handle:
+            for i, rec in enumerate(SeqIO.parse(handle, "fastq")):
+                if i in idx_to_barcode:
+                    add_id = str(uuid.uuid4())[:6]
+                    rec.id = add_id[:] + '-' + rec.id
+                    if directions[i] == 1:  # reverse complement required
+                        new_seq = Seq(reverse_complement(str(rec.seq))) # reverse complement sequence
+                        new_quals = rec.letter_annotations["phred_quality"][::-1] # reverse quality scores
+                        rec = SeqRecord(
+                            new_seq,
+                            id=rec.id,
+                            description="",
+                            letter_annotations={"phred_quality": new_quals})
+                    else:
+                        rec = SeqRecord(
+                            rec.seq,
+                            id=rec.id,
+                            description="",
+                            letter_annotations={"phred_quality": rec.letter_annotations["phred_quality"]})
 
-                matched_records.append(rec)
+                    matched_records.append(rec)
 
-                # write barcode fasta
-                barcode = SeqRecord(
-                        Seq(idx_to_barcode[i]),
-                        description="",
-                        id=rec.id)
-                barcodes.append(barcode)
+                    # write barcode fasta
+                    barcode = SeqRecord(
+                            Seq(idx_to_barcode[i]),
+                            description="",
+                            id=rec.id)
+                    barcodes.append(barcode)
 
     # write filtered full reads with qualities preserved
     SeqIO.write(matched_records, filtered_fn, "fastq")

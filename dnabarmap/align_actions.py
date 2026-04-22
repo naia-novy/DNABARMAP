@@ -104,8 +104,8 @@ def _smooth_roll_scores(scores, sigma):
 
 def find_best_rolls_batch(seqs, ref):
     # Parameters
-    min_run = 2
-    max_run = 5
+    min_run = 5
+    max_run = 10
     max_shift = seqs.shape[-2]
     min_shift = 0
     provided_range = np.arange(min_shift, max_shift + 1)

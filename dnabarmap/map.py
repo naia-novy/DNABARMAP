@@ -2,6 +2,7 @@ from glob import glob
 import regex
 import re
 import csv
+from concurrent.futures import ProcessPoolExecutor
 from Bio import SeqIO
 from os.path import isdir
 from pathlib import Path
@@ -10,6 +11,9 @@ import argparse
 import time
 
 from dnabarmap.utils import nuc_dict
+
+
+_MAP_WORKER_STATE = None
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -475,17 +479,17 @@ def make_orientation_matchers(barcode_template, left_coding_flank, right_coding_
     )
 
     return [
-        (regex_A, 'barcode', 'coding', 'A'),
-        (regex_B, 'barcode', 'coding', 'B'),
-        (regex_C, 'barcode', 'coding', 'A'),
-        (regex_D, 'barcode', 'coding', 'B'),
+        (regex.compile(regex_A, regex.BESTMATCH), 'barcode', 'coding', 'A'),
+        (regex.compile(regex_B, regex.BESTMATCH), 'barcode', 'coding', 'B'),
+        (regex.compile(regex_C, regex.BESTMATCH), 'barcode', 'coding', 'A'),
+        (regex.compile(regex_D, regex.BESTMATCH), 'barcode', 'coding', 'B'),
     ]
 def match_with_orientation(seq, matchers, orientation_counts):
     sorted_matchers = sorted(matchers, key=lambda m: orientation_counts.get(m[3], 0), reverse=True)
     other_key = {'A': 'B', 'B': 'A'}
 
     for compiled_regex, barcode_group, coding_group, name in sorted_matchers:
-        match = regex.search(compiled_regex, seq, regex.BESTMATCH)
+        match = compiled_regex.search(seq)
         if match:
             orientation_counts[name] = orientation_counts.get(name, 0) + 1
             return match.group(barcode_group), match.group(coding_group), orientation_counts, name
@@ -603,6 +607,140 @@ def _infer_reference_from_cluster_reads(consensus_file, left_coding_flank,
     return top_seq
 
 
+def _parse_consensus_read_counts(record):
+    counts = {
+        'n_cluster_reads': '',
+        'n_consensus_reads': '',
+        'n_polish_reads': '',
+    }
+    for token in record.description.split():
+        if '=' not in token:
+            continue
+        key, value = token.split('=', 1)
+        if key in counts:
+            counts[key] = value
+    return counts
+
+
+def _build_mapping_worker_state(barcode_template, left_coding_flank,
+                                right_coding_flank, left_fuzz, right_fuzz,
+                                bar_fuzz, hp_index, refs_by_len,
+                                max_edits_compressed, max_edits_full):
+    return {
+        'barcode_template': barcode_template,
+        'left_coding_flank': left_coding_flank,
+        'right_coding_flank': right_coding_flank,
+        'hp_index': hp_index,
+        'refs_by_len': refs_by_len,
+        'max_edits_compressed': max_edits_compressed,
+        'max_edits_full': max_edits_full,
+        'matchers': make_orientation_matchers(
+            barcode_template,
+            left_coding_flank,
+            right_coding_flank,
+            left_fuzz,
+            right_fuzz,
+            bar_fuzz,
+        ),
+    }
+
+
+def _init_mapping_worker(state):
+    global _MAP_WORKER_STATE
+    _MAP_WORKER_STATE = state
+
+
+def _map_one_consensus_file(file):
+    state = _MAP_WORKER_STATE
+    hp_index = state['hp_index']
+    refs_by_len = state['refs_by_len']
+    matchers = state['matchers']
+    barcode_template = state['barcode_template']
+    left_coding_flank = state['left_coding_flank']
+    right_coding_flank = state['right_coding_flank']
+    max_edits_compressed = state['max_edits_compressed']
+    max_edits_full = state['max_edits_full']
+
+    orientation_counts = {}
+    no_match_count = 0
+    snapped_count = 0
+    no_snap_count = 0
+    observations = 0
+    rows = []
+
+    for record in SeqIO.parse(file, file.split('.')[-1]):
+        seq = str(record.seq).upper()
+        read_counts = _parse_consensus_read_counts(record)
+        guided = None
+        if refs_by_len is not None:
+            guided = _extract_with_reference_guidance(
+                seq,
+                barcode_template,
+                left_coding_flank,
+                right_coding_flank,
+                refs_by_len,
+                max_edits_full=max_edits_full,
+            )
+
+        if guided is not None:
+            barcode = guided['barcode']
+            coding_region = guided['coding_region']
+            orientation = guided['orientation']
+            snapped_count += 1
+        else:
+            barcode, coding_region, orientation_counts, orientation = match_with_orientation(
+                seq, matchers, orientation_counts
+            )
+        if barcode:
+            if orientation == 'B':
+                barcode = reverse_complement(barcode)
+                coding_region = reverse_complement(coding_region)
+
+            if hp_index is not None and coding_region and guided is None:
+                ref_name, ref_seq = snap_to_reference(
+                    coding_region, hp_index,
+                    max_edits_compressed=max_edits_compressed,
+                    max_edits_full=max_edits_full,
+                )
+                if ref_seq is not None:
+                    coding_region = ref_seq
+                    snapped_count += 1
+                else:
+                    voted_ref = None
+                    if refs_by_len is not None:
+                        voted_ref = _infer_reference_from_cluster_reads(
+                            file,
+                            left_coding_flank,
+                            right_coding_flank,
+                            refs_by_len,
+                        )
+                    if voted_ref is not None:
+                        coding_region = voted_ref
+                        snapped_count += 1
+                    else:
+                        no_snap_count += 1
+
+            rows.append((
+                file,
+                barcode,
+                coding_region,
+                read_counts['n_cluster_reads'],
+                read_counts['n_consensus_reads'],
+                read_counts['n_polish_reads'],
+            ))
+        else:
+            no_match_count += 1
+        observations += 1
+
+    return {
+        'rows': rows,
+        'observations': observations,
+        'no_match_count': no_match_count,
+        'snapped_count': snapped_count,
+        'no_snap_count': no_snap_count,
+    }
+
+
 # ═════════════════════════════════════════════════════════════════
 # MAPPING
 # ═════════════════════════════════════════════════════════════════
@@ -622,8 +760,10 @@ def consensus_mapping(consensus_dir, barcode_template, left_coding_flank, right_
                  consensus_dir, barcode_template, left_coding_flank,
                  right_coding_flank, mapping_fn,
                  reference_seqs=reference_seqs, ref_seq_col=ref_seq_col,
-                 ref_name_col=ref_name_col, max_edits_compressed=max_edits_compressed,
-                 max_edits_full=max_edits_full)
+                 ref_name_col=ref_name_col,
+                 max_edits_compressed=max_edits_compressed,
+                 max_edits_full=max_edits_full,
+                 threads=kwargs.get('threads', 1))
 
 
 def direct_mapping(fn, barcode_template, left_coding_flank, right_coding_flank,
@@ -641,15 +781,17 @@ def direct_mapping(fn, barcode_template, left_coding_flank, right_coding_flank,
                  fn, barcode_template, left_coding_flank,
                  right_coding_flank, mapping_fn,
                  reference_seqs=reference_seqs, ref_seq_col=ref_seq_col,
-                 ref_name_col=ref_name_col, max_edits_compressed=max_edits_compressed,
-                 max_edits_full=max_edits_full)
+                 ref_name_col=ref_name_col,
+                 max_edits_compressed=max_edits_compressed,
+                 max_edits_full=max_edits_full,
+                 threads=kwargs.get('threads', 1))
 
 
 def map_barcodes(left_fuzz, right_fuzz, bar_fuzz,
                  input_files, barcode_template, left_coding_flank,
                  right_coding_flank, mapping_fn,
                  reference_seqs=None, ref_seq_col=None, ref_name_col=None,
-                 max_edits_compressed=3, max_edits_full=5, **kwargs):
+                 max_edits_compressed=3, max_edits_full=5, threads=1, **kwargs):
 
     # ── Load reference index if provided ─────────────────────────
     hp_index = None
@@ -681,74 +823,61 @@ def map_barcodes(left_fuzz, right_fuzz, bar_fuzz,
     else:
         consensus_files = [input_files]
 
-    matchers = make_orientation_matchers(barcode_template, left_coding_flank, right_coding_flank,
-                                         left_fuzz, right_fuzz, bar_fuzz)
-    orientation_counts = {}
+    worker_state = _build_mapping_worker_state(
+        barcode_template=barcode_template,
+        left_coding_flank=left_coding_flank,
+        right_coding_flank=right_coding_flank,
+        left_fuzz=left_fuzz,
+        right_fuzz=right_fuzz,
+        bar_fuzz=bar_fuzz,
+        hp_index=hp_index,
+        refs_by_len=refs_by_len,
+        max_edits_compressed=max_edits_compressed,
+        max_edits_full=max_edits_full,
+    )
+
+    threads = max(1, int(threads))
     no_match_count = 0
     snapped_count = 0
     no_snap_count = 0
     observations = 0
     mapping_fn = '.'.join(mapping_fn.split('.')[:-1]) + '.tsv'
 
+    if threads > 1 and len(consensus_files) > 1:
+        worker_count = min(threads, len(consensus_files))
+        print(f"Mapping in parallel across {worker_count} workers")
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+            initializer=_init_mapping_worker,
+            initargs=(worker_state,),
+        ) as executor:
+            file_results = list(executor.map(_map_one_consensus_file, sorted(consensus_files)))
+    else:
+        _init_mapping_worker(worker_state)
+        file_results = [_map_one_consensus_file(file) for file in sorted(consensus_files)]
+
     with open(mapping_fn, "w") as out:
-        out.write("filename\tbarcode\tcoding_region\n")
-        for file in sorted(consensus_files):
-            for record in SeqIO.parse(file, file.split('.')[-1]):
-                seq = str(record.seq).upper()
-                guided = None
-                if refs_by_len is not None:
-                    guided = _extract_with_reference_guidance(
-                        seq,
-                        barcode_template,
-                        left_coding_flank,
-                        right_coding_flank,
-                        refs_by_len,
-                        max_edits_full=max_edits_full,
-                    )
-
-                if guided is not None:
-                    barcode = guided['barcode']
-                    coding_region = guided['coding_region']
-                    orientation = guided['orientation']
-                    snapped_count += 1
-                else:
-                    barcode, coding_region, orientation_counts, orientation = match_with_orientation(
-                        seq, matchers, orientation_counts
-                    )
-                if barcode:
-                    if orientation == 'B':
-                        barcode = reverse_complement(barcode)
-                        coding_region = reverse_complement(coding_region)
-
-                    # ── Snap coding region to nearest reference ───
-                    if hp_index is not None and coding_region and guided is None:
-                        ref_name, ref_seq = snap_to_reference(
-                            coding_region, hp_index,
-                            max_edits_compressed=max_edits_compressed,
-                            max_edits_full=max_edits_full,
-                        )
-                        if ref_seq is not None:
-                            coding_region = ref_seq
-                            snapped_count += 1
-                        else:
-                            voted_ref = None
-                            if refs_by_len is not None:
-                                voted_ref = _infer_reference_from_cluster_reads(
-                                    file,
-                                    left_coding_flank,
-                                    right_coding_flank,
-                                    refs_by_len,
-                                )
-                            if voted_ref is not None:
-                                coding_region = voted_ref
-                                snapped_count += 1
-                            else:
-                                no_snap_count += 1
-
-                    out.write(f"{file}\t{barcode}\t{coding_region}\n")
-                else:
-                    no_match_count += 1
-                observations += 1
+        out.write(
+            "filename\tbarcode\tcoding_region\t"
+            "n_cluster_reads\tn_consensus_reads\tn_polish_reads\n"
+        )
+        for result in file_results:
+            for (
+                file,
+                barcode,
+                coding_region,
+                n_cluster_reads,
+                n_consensus_reads,
+                n_polish_reads,
+            ) in result['rows']:
+                out.write(
+                    f"{file}\t{barcode}\t{coding_region}\t"
+                    f"{n_cluster_reads}\t{n_consensus_reads}\t{n_polish_reads}\n"
+                )
+            no_match_count += result['no_match_count']
+            snapped_count += result['snapped_count']
+            no_snap_count += result['no_snap_count']
+            observations += result['observations']
 
     print(f"Found a match for {observations - no_match_count}/{observations} sequences")
     if hp_index is not None:
@@ -776,14 +905,17 @@ def main():
                                  "the barcode interval.")
         parser.add_argument('--fn', type=str, default=None,
                             help="Consensus FASTA file to map.")
-        parser.add_argument('--left_coding_flank', type=str, default=None,
-                            help="Constant sequence immediately left of the "
-                                 "coding region.")
-        parser.add_argument('--right_coding_flank', type=str, default=None,
-                            help="Constant sequence immediately right of the "
-                                 "coding region.")
+        parser.add_argument("--left_coding_flank", required=True, default=None,
+                            help="Constant sequence immediately left of the coding "
+                                 "region (in same reading frame as barcode). Used during final mapping. ")
+        parser.add_argument("--right_coding_flank", required=True, default=None,
+                            help="Constant sequence immediately right of the coding "
+                                 "region (in same reading frame as barcode). Used during final mapping.")
         parser.add_argument('--mapping_fn', type=str, default=None,
                             help="Output TSV filename for mapping results.")
+        parser.add_argument("--threads", type=int, default=1,
+                            help="Worker count for mapping. Values above 1 "
+                                 "parallelize across consensus files.")
         parser.add_argument('--reference_seqs', type=str, default=None,
                             help="Optional reference sequences for coding-region snapping.")
         parser.add_argument('--ref_seq_col', type=str, default=None,
@@ -814,6 +946,9 @@ def main():
                                  "files to map.")
         parser.add_argument("--mapping_fn", default=None, required=True,
                             help="Output TSV filename for the final mapping results.")
+        parser.add_argument("--threads", type=int, default=1,
+                            help="Worker count for mapping. Values above 1 "
+                                 "parallelize across consensus files.")
         parser.add_argument('--barcode_template', type=str, required=True, default=None,
                             help="Degenerate barcode template used to locate the "
                                  "barcode interval in each consensus.")

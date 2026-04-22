@@ -93,12 +93,10 @@ def cli():
                              'flanks can be removed later during mapping.')
     parser.add_argument("--left_coding_flank", required=True, default=None,
                         help="Constant sequence immediately left of the coding "
-                             "region. Used during final mapping and consensus "
-                             "flank correction.")
+                             "region (in same reading frame as barcode). Used during final mapping. ")
     parser.add_argument("--right_coding_flank", required=True, default=None,
                         help="Constant sequence immediately right of the coding "
-                             "region. Used during final mapping and consensus "
-                             "flank correction.")
+                             "region (in same reading frame as barcode). Used during final mapping.")
 
     # Alignment parameters
     parser.add_argument('--batch_size', type=int, default=512,
@@ -115,6 +113,10 @@ def cli():
     parser.add_argument("--threads", type=int, default=8,
                         help="Total thread budget for clustering, consensus, "
                              "and mapping.")
+    parser.add_argument("--max_open_fastq_handles", type=int, default=None,
+                        help="Maximum cluster FASTQ files to keep open at once "
+                             "when materializing clusters/full_seqs. Lower "
+                             "this on servers with strict open-file limits.")
 
     # Consensus parameters
     parser.add_argument("--medaka_model", type=str,

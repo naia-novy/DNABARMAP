@@ -1,7 +1,6 @@
 import random
 import math
 import argparse
-from collections import Counter
 from functools import lru_cache
 from numpy.lib.stride_tricks import sliding_window_view
 
@@ -44,27 +43,8 @@ def could_form_homopolymer(template, max_homopolymer_len):
                 run = 0
     return False
 
-def adjust_p(p):
-    return p
-
-
 def mean_degeneracy(template):
     return float(np.mean([len(nuc_dict[v]) for v in template]))
-
-def calculate_mean_p(template, adjust=True):
-    obs = []
-    for i, v in enumerate(template):
-        obs.append(len(nuc_dict[v]))
-    obs = Counter(obs)
-    p = 0
-    for k, v in obs.items():
-        p += v / k
-    p /= len(template)
-
-    if adjust:
-        return adjust_p(p)
-    else:
-        return p
 
 
 def _template_masks(template):
@@ -112,10 +92,6 @@ def _template_metrics(template, max_shift=10):
         'shift_similarity': shift_best,
         'rc_similarity': rc_best,
     }
-
-
-def high_degeneracy_penalty(template):
-    return _template_metrics(template)['high_degeneracy_penalty']
 
 
 def shift_similarity_penalty(template, max_shift=10):

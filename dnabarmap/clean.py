@@ -113,11 +113,16 @@ fns = ['mappinga/barcode22_mapping.tsv',
 fns = ['mapping_illumina/barcode22_mapping.tsv',
        'mapping_illumina/barcode23_mapping.tsv',]
 
-fns = ['mapping_direct_illumina/barcode22_mapping.tsv',
-       'mapping_direct_illumina/barcode23_mapping.tsv',]
+# fns = ['mapping_nanopore/barcode22_mapping.tsv',
+#        'mapping_nanopore/barcode23_mapping.tsv',]
 
-count_cutoff = 5
-hamming_distance = 1
+
+fns = ['mapping_jonah/CadC_DMS_JOS_mapping.tsv',
+        'mapping_jonah/LacI_DMS_JOS_mapping.tsv',
+       ]
+
+count_cutoff = 1
+hamming_distance = 3
 
 RBS = 'TTTAACTTTAAGAAGGAGATATACAT'
 promoter_options = pd.read_csv(promoter_path)

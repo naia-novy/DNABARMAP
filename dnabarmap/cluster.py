@@ -1,8 +1,9 @@
 import subprocess
 import tempfile
+from collections import OrderedDict
 from Bio import SeqIO
 from glob import glob
-from dnabarmap.utils import import_cupy_numpy
+from dnabarmap.utils import get_cluster_shard_dir, import_cupy_numpy
 from os import makedirs, path
 import argparse
 import time
@@ -12,6 +13,28 @@ import shutil
 from pathlib import Path
 
 np = import_cupy_numpy()
+DEFAULT_FASTQ_WRITE_BUFFER_BYTES = 256 * 1024
+
+
+def _get_max_open_fastq_handles(default=128, reserve=32):
+    """Pick a safe output-handle budget below the process open-file limit."""
+    try:
+        import resource
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft_limit <= 0:
+            return default
+        return max(16, min(default, soft_limit - reserve))
+    except Exception:
+        return default
+
+
+def _flush_fastq_buffer(handle_state):
+    """Write any buffered FASTQ text for one output handle."""
+    if not handle_state['parts']:
+        return
+    handle_state['handle'].write(''.join(handle_state['parts']))
+    handle_state['parts'].clear()
+    handle_state['chars'] = 0
 
 def summarize_fasta_lengths(input_fasta):
     lengths = [len(record.seq) for record in SeqIO.parse(input_fasta, 'fasta')]
@@ -74,9 +97,9 @@ def parse_cluster_tsv(tsv_path, input_fasta, min_sequences, output_dir):
         for rep_id, size in passing_cluster_sizes:
             handle.write(f'{rep_id}\t{size}\n')
 
-    print(f'Passing cluster sizes (>= {min_sequences}, descending):')
-    for rep_id, size in passing_cluster_sizes:
-        print(f'  {rep_id}: {size}')
+    # print(f'Passing cluster sizes (>= {min_sequences}, descending):')
+    # for rep_id, size in passing_cluster_sizes:
+    #     print(f'  {rep_id}: {size}')
 
     for rep_id, members in clusters_by_rep.items():
         if len(members) >= min_sequences:
@@ -90,11 +113,19 @@ def parse_cluster_tsv(tsv_path, input_fasta, min_sequences, output_dir):
     print(f'Cluster sizes written to {sizes_tsv}')
 
 
-def _find_barcode_fasta(output_dir, output_fn=None):
+def _find_barcode_fasta(output_dir, output_fn=None, cluster_input_fn=None):
     """
     Locate the barcode FASTA produced by align().
-    Checks output_fn first (if provided), then searches output_dir.
+    Checks an explicit cluster input first (if provided), then the explicit
+    path passed from run.py, then searches output_dir.
     """
+    if cluster_input_fn:
+        if path.exists(cluster_input_fn):
+            return cluster_input_fn
+        raise FileNotFoundError(
+            f"Requested barcode FASTA does not exist: {cluster_input_fn}"
+        )
+
     # If run.py passed output_fn, treat it as authoritative.
     if output_fn:
         if path.exists(output_fn):
@@ -195,7 +226,11 @@ def cluster(min_sequences, threads, id, c, output_dir, **kwargs):
     """
 
     # ── Find the barcode and reoriented files from align step ────
-    barcode_fasta = _find_barcode_fasta(output_dir, kwargs.get('output_fn'))
+    barcode_fasta = _find_barcode_fasta(
+        output_dir,
+        output_fn=kwargs.get('output_fn'),
+        cluster_input_fn=kwargs.get('cluster_input_fn'),
+    )
     reoriented_fastq = _find_reoriented_fastq(output_dir, kwargs.get('input_fq'),
                                               kwargs.get('reoriented_fn'))
 
@@ -247,7 +282,7 @@ def cluster(min_sequences, threads, id, c, output_dir, **kwargs):
             '-k', '10',
             '--gap-open', '1',
             '-s', '3',
-            '-e', '0.05',
+            '-e', '0.01',
             '--remove-tmp-files', '1',
             '--adjust-kmer-len', '0',
             '--rescore-mode', '3',
@@ -287,7 +322,7 @@ def cluster(min_sequences, threads, id, c, output_dir, **kwargs):
 
 
 def save_full_seqs(output_dir, **kwargs):
-    """Write full FASTQ records for each cluster using disk-backed indexing."""
+    """Write full FASTQ records for each cluster with a single FASTQ pass."""
     # Find the reoriented FASTQ — use cached path from cluster() if available,
     # otherwise search for it
     reoriented = kwargs.get('_reoriented_fastq')
@@ -295,48 +330,86 @@ def save_full_seqs(output_dir, **kwargs):
         reoriented = _find_reoriented_fastq(output_dir, kwargs.get('input_fq'),
                                             kwargs.get('reoriented_fn'))
 
-    print(f"Indexing full FASTQ: {reoriented}")
-    fastq_records = SeqIO.index(reoriented, "fastq")
-    print(f"Indexed {len(fastq_records):,} reads from full FASTQ")
-
     cluster_fastas = glob(f"{output_dir}/clusters/barcodes/*/cluster_*.fasta")
     makedirs(f"{output_dir}/clusters/full_seqs/", exist_ok=True)
 
-    written = 0
-    missing = 0
+    read_to_output = {}
+    output_paths = {}
     for fasta_path in cluster_fastas:
         cluster_id = path.basename(fasta_path).split(".")[0]
         sub_dir = get_output_subdir(cluster_id, output_dir + '/clusters/full_seqs')
         out_fastq = f"{sub_dir}/{cluster_id}.fastq"
-
-        cluster_records = []
         for rec in SeqIO.parse(fasta_path, "fasta"):
-            read_id = rec.id
-            if read_id not in fastq_records:
-                missing += 1
+            if rec.id in read_to_output:
+                print(f"WARNING: read {rec.id} appears in multiple barcode clusters; keeping first assignment")
                 continue
-            cluster_records.append(fastq_records[read_id])
+            read_to_output[rec.id] = out_fastq
+        output_paths[out_fastq] = cluster_id
 
-        if cluster_records:
-            SeqIO.write(cluster_records, out_fastq, "fastq")
-            written += 1
+    print(f"Streaming full FASTQ once: {reoriented}")
+    seen_in_clusters = set()
+    written_counts = {out_fastq: 0 for out_fastq in output_paths}
+    max_open_handles = kwargs.get('max_open_fastq_handles')
+    if max_open_handles is None:
+        max_open_handles = _get_max_open_fastq_handles()
+    max_open_handles = max(1, int(max_open_handles))
+    write_buffer_bytes = kwargs.get('fastq_write_buffer_bytes')
+    if write_buffer_bytes is None:
+        write_buffer_bytes = DEFAULT_FASTQ_WRITE_BUFFER_BYTES
+    write_buffer_bytes = max(1, int(write_buffer_bytes))
+    print(f"Using up to {max_open_handles} open cluster FASTQ handles at a time")
+    print(f"FASTQ write buffer per handle: {write_buffer_bytes:,} bytes")
 
+    handles = OrderedDict()
+    total_reads = 0
+    try:
+        for record in SeqIO.parse(reoriented, "fastq"):
+            total_reads += 1
+            out_fastq = read_to_output.get(record.id)
+            if out_fastq is None:
+                continue
+            handle = handles.get(out_fastq)
+            if handle is None:
+                if len(handles) >= max_open_handles:
+                    _, old_state = handles.popitem(last=False)
+                    _flush_fastq_buffer(old_state)
+                    old_state['handle'].close()
+                handle = {
+                    'handle': open(out_fastq, 'a', buffering=write_buffer_bytes),
+                    'parts': [],
+                    'chars': 0,
+                }
+                handles[out_fastq] = handle
+            else:
+                handles.move_to_end(out_fastq)
+            fastq_text = record.format("fastq")
+            handle['parts'].append(fastq_text)
+            handle['chars'] += len(fastq_text)
+            if handle['chars'] >= write_buffer_bytes:
+                _flush_fastq_buffer(handle)
+            written_counts[out_fastq] += 1
+            seen_in_clusters.add(record.id)
+    finally:
+        for handle_state in handles.values():
+            _flush_fastq_buffer(handle_state)
+            handle_state['handle'].close()
+
+    written = sum(1 for count in written_counts.values() if count > 0)
+    missing = len(read_to_output) - len(seen_in_clusters)
+    print(f"Scanned {total_reads:,} reads from full FASTQ")
     if missing:
         print(f"WARNING: {missing} reads referenced in clusters were not found in full FASTQ")
     print(f"Wrote {written} clusters with full FASTQ sequences.")
 
-    fastq_records.close()
-
 
 def get_output_subdir(cluster_id, cluster_dir):
-    sub_dir = cluster_dir + '/' + cluster_id[-2:]
-    makedirs(sub_dir, exist_ok=True)
-    return sub_dir
+    return get_cluster_shard_dir(cluster_id, cluster_dir)
 
 
 def save_clusters_to_files(cluster_id, clusters, output_dir):
-    sub_dir = get_output_subdir(cluster_id, output_dir)
-    filename = f"{sub_dir}/cluster_{cluster_id}.fasta"
+    file_stem = f"cluster_{cluster_id}"
+    sub_dir = get_output_subdir(file_stem, output_dir)
+    filename = f"{sub_dir}/{file_stem}.fasta"
     with open(filename, 'w') as f:
         for seq_id, seq in clusters.items():
             f.write(seq_id + '\n')
@@ -350,22 +423,38 @@ def main(**kwargs):
     print('Clustering barcodes...')
     cluster_start_time = time.time()
     cluster(**kwargs)
+    mmseqs_time = time.time() - cluster_start_time
+    print(f'Finished MMseqs clustering in {round(mmseqs_time / 60, 1)} minutes')
+
+    if kwargs.get('skip_full_seqs', False):
+        cluster_time = time.time() - cluster_start_time
+        print('Skipping full cluster FASTQ writing (--skip_full_seqs).')
+        print(f'Finished clustering barcodes in {round(cluster_time / 60, 1)} minutes\n')
+        return
+
+    save_start_time = time.time()
     save_full_seqs(**kwargs)
+    save_time = time.time() - save_start_time
+
     cluster_time = time.time() - cluster_start_time
+    print(f'Finished saving full cluster FASTQs in {round(save_time / 60, 1)} minutes')
     print(f'Finished clustering barcodes in {round(cluster_time / 60, 1)} minutes\n')
 
 
 def cli():
     parser = argparse.ArgumentParser(
-        description="Cluster already-aligned barcode FASTAs found under "
-                    "output_dir/aligned/. This command does not run the align "
-                    "step; it only consumes files already written there."
+        description="Cluster an aligned barcode FASTA. If --input_fn is not "
+                    "provided, the command searches output_dir/aligned/ for "
+                    "the barcode FASTA produced by align or dnabarmap."
     )
 
     # Directories and filenames
     parser.add_argument('--output_dir', type=str, default=None, required=True,
                         help="Pipeline output directory containing aligned/ "
                              "from a previous align or dnabarmap run.")
+    parser.add_argument('--input_fn', dest='cluster_input_fn', type=str, default=None,
+                        help="Optional aligned barcode FASTA to cluster. "
+                             "If omitted, cluster searches output_dir/aligned/.")
 
     # Cluster parameters
     parser.add_argument("--id", type=float, default=0.75,
@@ -379,13 +468,22 @@ def cli():
                         help="Minimum reads required for a cluster to be kept.")
     parser.add_argument("--threads", type=int, default=8,
                         help="Thread count for MMseqs clustering.")
+    parser.add_argument("--max_open_fastq_handles", type=int, default=None,
+                        help="Maximum cluster FASTQ files to keep open at once "
+                             "when writing clusters/full_seqs. Lower this on "
+                             "servers with strict open-file limits.")
+    parser.add_argument("--skip_full_seqs", action="store_true",
+                        help="Skip writing clusters/full_seqs/*.fastq. Use "
+                             "this when you only need barcode-cluster sizes "
+                             "or barcode FASTAs and are not running consensus "
+                             "yet.")
     args, unknown = parser.parse_known_args()
     if unknown:
         parser.error(
             "Unrecognized arguments: "
             + " ".join(unknown)
-            + ". The standalone cluster command only uses files already "
-              "present in output_dir/aligned/."
+            + ". The standalone cluster command uses an explicit barcode FASTA "
+              "from --input_fn or files already present in output_dir/aligned/."
         )
 
     # Set up directories and filenames
